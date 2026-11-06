@@ -1,0 +1,36 @@
+{
+  "id": "com.oxideterm.microcon-helper",
+  "name": "MicroCon Helper",
+  "version": "0.3.0",
+  "description": "Configure MicroCon UART bridge and monitor status.",
+  "author": "xiaox",
+  "license": "MIT",
+  "runtime": {
+    "kind": "process",
+    "entry": "bin/plugin"
+  },
+  "permissions": {
+    "capabilities": [
+      "ui.write",
+      "ble.read",
+      "ble.write",
+      "terminal.content.read",
+      "terminal.write"
+    ]
+  },
+  "contributes": {
+    "terminalHooks": {
+      "inputInterceptor": true
+    },
+    "tabs": [
+      {
+        "id": "microcon-helper",
+        "title": "MicroCon Helper",
+        "icon": "bluetooth"
+      }
+    ]
+  },
+  "engines": {
+    "oxideterm": ">=2.2.6"
+  }
+}

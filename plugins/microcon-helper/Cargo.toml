@@ -1,0 +1,13 @@
+[package]
+name = "oxideterm-microcon-helper"
+version = "0.3.0"
+edition = "2024"
+license = "MIT"
+description = "MicroCon BLE UART bridge baud-rate control plugin for OxideTerm"
+
+[dependencies]
+serde_json = "1"
+
+[[bin]]
+name = "oxideterm-microcon-helper"
+path = "src/main.rs"

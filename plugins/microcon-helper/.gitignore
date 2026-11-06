@@ -1,0 +1,17 @@
+# Local operating-system and editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Rust build artifacts and the compiled binaries staged into bin/
+/target/
+/bin/oxideterm-microcon-helper
+/bin/oxideterm-microcon-helper.exe
+
+# Plugin packages
+/dist/
+
+# Local environment files
+.env
+.env.*
+!.env.example

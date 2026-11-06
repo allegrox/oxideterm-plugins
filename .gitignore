@@ -18,3 +18,7 @@ plugin.wasm
 .env
 .env.*
 !.env.example
+
+# Local AI files
+CLAUDE.md
+CLAUDE.local.md

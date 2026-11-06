@@ -1,0 +1,73 @@
+name: Build MicroCon Helper plugin
+
+on:
+  push:
+    tags: ['microcon-helper-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, arch: arm64, target: aarch64-apple-darwin }
+          - { os: macos-15-intel, arch: x64, target: x86_64-apple-darwin }
+          - { os: ubuntu-22.04, arch: x64, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-22.04-arm, arch: arm64, target: aarch64-unknown-linux-gnu }
+          - { os: windows-2022, arch: x64, target: x86_64-pc-windows-msvc }
+          - { os: windows-11-arm, arch: arm64, target: aarch64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    env:
+      PACKAGE_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+      # Node is only needed for the marketplace release tooling below.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          architecture: ${{ matrix.arch }}
+      - run: npm ci --ignore-scripts
+      - run: rustup toolchain install 1.94.1-${{ matrix.target }} --profile minimal
+      - run: rustup default 1.94.1-${{ matrix.target }}
+      - run: cargo test --locked
+        working-directory: plugins/microcon-helper
+      - run: cargo build --release --locked
+        working-directory: plugins/microcon-helper
+      - name: Stage compiled binary into bin/
+        shell: bash
+        working-directory: plugins/microcon-helper
+        run: |
+          if [ -f target/release/oxideterm-microcon-helper.exe ]; then
+            cp target/release/oxideterm-microcon-helper.exe bin/
+          else
+            cp target/release/oxideterm-microcon-helper bin/
+          fi
+      - if: startsWith(github.ref, 'refs/tags/microcon-helper-v')
+        run: node scripts/release-plugin.mjs prepare plugins/microcon-helper
+      - name: Package Unix plugin
+        if: runner.os != 'Windows'
+        run: sh plugins/microcon-helper/scripts/package.sh
+      - name: Package Windows plugin
+        if: runner.os == 'Windows'
+        run: pwsh -NoProfile -File plugins/microcon-helper/scripts/package.ps1
+      - uses: actions/upload-artifact@v4
+        if: success() || failure()
+        with:
+          name: microcon-helper-${{ matrix.target }}
+          path: plugins/microcon-helper/dist/*.zip
+          if-no-files-found: error
+
+  release:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/microcon-helper-v')
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish-plugin.yml
+    with:
+      plugin: microcon-helper
+      artifacts: microcon-helper-*
