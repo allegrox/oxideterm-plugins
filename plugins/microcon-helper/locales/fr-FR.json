@@ -1,6 +1,6 @@
 {
   "title": "Assistant MicroCon",
-  "description": "Définit la vitesse de transmission via le service de contrôle de l'appareil (1200–921600).",
+  "description": "Configure le pont UART MicroCon et surveille l'état.",
   "baudLabel": "Vitesse de transmission",
   "noSessions": "Aucune session BLE",
   "apply": "Appliquer",

@@ -1,6 +1,6 @@
 {
   "title": "MicroCon 助手",
-  "description": "透過裝置控制服務設定序列埠波特率（1200–921600）。",
+  "description": "設定 MicroCon UART 橋接並監控狀態。",
   "baudLabel": "波特率",
   "noSessions": "無 BLE 連線",
   "apply": "套用",
@@ -25,11 +25,11 @@
   "mcBaudUsage": "用法：/mc baud <rate>（1200–921600）",
   "mcBaudOk": "✓ 波特率已設為 {baud} → {where}",
   "mcStatusBadFrame": "裝置狀態幀無法解析。",
-  "toolbarButton": "MC Helper",
+  "toolbarButton": "MC 助手",
   "toolbarModeOff": "關閉",
   "toolbarModeInline": "行內",
   "toolbarModeOverlay": "浮窗",
-  "toolbarUnavailable": "MicroCon Helper 外掛程式未安裝或已停用。",
+  "toolbarUnavailable": "MicroCon 助手 外掛程式未安裝或已停用。",
   "statusBaud": "目前波特率",
   "statusBattery": "電池剩餘電量",
   "statusTemp": "裝置溫度"

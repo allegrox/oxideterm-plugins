@@ -1,6 +1,6 @@
 {
   "title": "MicroCon Helper",
-  "description": "Set the serial baud rate via the device control service (1200–921600).",
+  "description": "Configure MicroCon UART bridge and monitor status.",
   "baudLabel": "Baud rate",
   "noSessions": "No BLE sessions",
   "apply": "Apply",

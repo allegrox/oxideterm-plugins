@@ -1,6 +1,6 @@
 {
   "title": "Assistente MicroCon",
-  "description": "Define a taxa de baud pelo serviço de controle do dispositivo (1200–921600).",
+  "description": "Configura a ponte UART do MicroCon e monitora o status.",
   "baudLabel": "Taxa de baud",
   "noSessions": "Nenhuma sessão BLE",
   "apply": "Aplicar",

@@ -1,6 +1,6 @@
 {
   "title": "MicroCon ヘルパー",
-  "description": "デバイス制御サービス経由でボーレートを設定します（1200–921600）。",
+  "description": "MicroCon UARTブリッジを設定し、状態を監視します。",
   "baudLabel": "ボーレート",
   "noSessions": "BLE セッションがありません",
   "apply": "適用",

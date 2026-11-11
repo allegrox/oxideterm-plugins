@@ -1,6 +1,6 @@
 {
   "title": "MicroCon 도우미",
-  "description": "장치 제어 서비스를 통해 보레이트를 설정합니다(1200–921600).",
+  "description": "MicroCon UART 브리지를 구성하고 상태를 모니터링합니다.",
   "baudLabel": "보레이트",
   "noSessions": "BLE 세션 없음",
   "apply": "적용",

@@ -1,6 +1,6 @@
 {
   "title": "Assistente MicroCon",
-  "description": "Imposta la baud rate tramite il servizio di controllo del dispositivo (1200–921600).",
+  "description": "Configura il bridge UART MicroCon e monitora lo stato.",
   "baudLabel": "Baud rate",
   "noSessions": "Nessuna sessione BLE",
   "apply": "Applica",

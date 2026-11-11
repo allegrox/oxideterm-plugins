@@ -1,6 +1,6 @@
 {
   "title": "MicroCon-Helfer",
-  "description": "Legt die Baudrate über den Gerätesteuerungsdienst fest (1200–921600).",
+  "description": "Konfiguriert die MicroCon-UART-Bridge und überwacht den Status.",
   "baudLabel": "Baudrate",
   "noSessions": "Keine BLE-Sitzungen",
   "apply": "Anwenden",

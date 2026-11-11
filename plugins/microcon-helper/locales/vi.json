@@ -1,6 +1,6 @@
 {
   "title": "Trợ lý MicroCon",
-  "description": "Đặt tốc độ baud qua dịch vụ điều khiển thiết bị (1200–921600).",
+  "description": "Cấu hình cầu UART MicroCon và theo dõi trạng thái.",
   "baudLabel": "Tốc độ baud",
   "noSessions": "Không có phiên BLE",
   "apply": "Áp dụng",

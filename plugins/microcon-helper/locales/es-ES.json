@@ -1,6 +1,6 @@
 {
   "title": "Asistente MicroCon",
-  "description": "Establece la velocidad en baudios mediante el servicio de control del dispositivo (1200–921600).",
+  "description": "Configura el puente UART de MicroCon y supervisa el estado.",
   "baudLabel": "Velocidad en baudios",
   "noSessions": "Sin sesiones BLE",
   "apply": "Aplicar",
