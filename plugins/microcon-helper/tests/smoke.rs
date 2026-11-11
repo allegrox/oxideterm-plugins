@@ -23,11 +23,6 @@ struct Host {
 impl Host {
     fn spawn() -> Host {
         let mut child = Command::new(env!("CARGO_BIN_EXE_oxideterm-microcon-helper"))
-            // Keep the child's debug log out of the running plugin's log file.
-            .env(
-                "MICROCON_HELPER_LOG",
-                "/tmp/oxideterm-microcon-helper-smoke-tests.log",
-            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

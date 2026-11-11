@@ -300,43 +300,11 @@ fn write_frame(shared: &Shared, payload: &Value, request_id: Option<&str>) {
         "requestId": request_id.map(Value::from).unwrap_or(Value::Null),
         "payload": payload,
     });
-    // Debug trace: the host discards plugin stderr, so runtime evidence has to
-    // go to a file. Frames are logged by type/size only, never full content.
-    let summary = if let Some(kind) = payload.get("type").and_then(Value::as_str) {
-        format!("OUT {kind}")
-    } else if payload.get("result").is_some() {
-        format!("OUT response {}", request_id.unwrap_or(""))
-    } else {
-        "OUT frame".to_string()
-    };
-    debug_log(&summary);
     let _guard = shared.stdout_lock.lock().unwrap_or_else(|e| e.into_inner());
     let stdout = io::stdout();
     let mut handle = stdout.lock();
     let _ = writeln!(handle, "{envelope}");
     let _ = handle.flush();
-}
-
-fn debug_log(message: &str) {
-    use std::io::Write;
-    // Test binaries share this process and must not interleave with the
-    // running plugin's log file, or diagnostics become unreadable.
-    let path = if cfg!(test) {
-        "/tmp/oxideterm-microcon-helper-unit-tests.log".to_string()
-    } else {
-        std::env::var("MICROCON_HELPER_LOG")
-            .unwrap_or_else(|_| "/tmp/oxideterm-microcon-helper.log".to_string())
-    };
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-    {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        let _ = writeln!(file, "[{:.3}] {message}", now.as_secs_f64());
-    }
 }
 
 fn respond_ok(shared: &Shared, request_id: &str, value: Value) {
@@ -392,7 +360,6 @@ fn call_host(shared: &Shared, namespace: &str, method: &str, args: Value) -> Res
     match rx.recv_timeout(Duration::from_millis(HOST_CALL_TIMEOUT_MS)) {
         Ok(result) => {
             if result.get("status").and_then(Value::as_str) == Some("ok") {
-                debug_log(&format!("HOST {namespace}.{method} ok"));
                 Ok(result.get("value").cloned().unwrap_or(Value::Null))
             } else {
                 let message = result
@@ -400,7 +367,6 @@ fn call_host(shared: &Shared, namespace: &str, method: &str, args: Value) -> Res
                     .and_then(Value::as_str)
                     .unwrap_or("host call failed")
                     .to_string();
-                debug_log(&format!("HOST {namespace}.{method} error: {message}"));
                 Err(message)
             }
         }
@@ -410,7 +376,6 @@ fn call_host(shared: &Shared, namespace: &str, method: &str, args: Value) -> Res
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .remove(&request_id);
-            debug_log(&format!("HOST {namespace}.{method} timeout"));
             Err(format!("host call timeout: {namespace}.{method}"))
         }
     }
@@ -915,12 +880,6 @@ fn handle_ble_notification(shared: &Shared, payload: &Value) {
         let Ok(message) = serde_json::from_str::<Value>(trimmed) else {
             continue;
         };
-        debug_log(&format!(
-            "status frame: type={:?} id={:?} baud={:?}",
-            message.get("type").and_then(Value::as_str),
-            message.get("id").and_then(Value::as_i64),
-            message.get("baud").and_then(Value::as_i64),
-        ));
         // Accept the device ack for this exact command id. Baud waits may also
         // resolve on a status frame already reporting the target rate (the /mc
         // path overrides the wanted rate; the tab path falls back to the
@@ -1331,9 +1290,6 @@ fn feed_input(shared: &Arc<Shared>, terminal_id: Option<&str>, data: &str) -> Va
 }
 
 fn execute_mc_command(shared: &Arc<Shared>, terminal_id: Option<String>, line: String) {
-    debug_log(&format!(
-        "mc command: terminal={terminal_id:?} line={line:?}"
-    ));
     let shared = Arc::clone(shared);
     thread::spawn(move || {
         let outcome = run_mc_command(&shared, terminal_id.as_deref(), &line);
@@ -1352,9 +1308,7 @@ fn execute_mc_command(shared: &Arc<Shared>, terminal_id: Option<String>, line: S
         if let Some(terminal_id) = &terminal_id {
             args["terminalId"] = json!(terminal_id);
         }
-        if let Err(message) = call_host_retry(&shared, "terminal", "writeLocal", args) {
-            debug_log(&format!("mc writeLocal failed: {message}"));
-        }
+        let _ = call_host_retry(&shared, "terminal", "writeLocal", args);
     });
 }
 
@@ -1812,15 +1766,6 @@ fn handle_request(shared: Arc<Shared>, payload: Value) {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    if kind_type == "dispatchCommand" {
-        let command = payload
-            .pointer("/kind/command")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        debug_log(&format!("IN dispatchCommand {command}"));
-    } else {
-        debug_log(&format!("IN {kind_type}"));
-    }
     match kind_type.as_str() {
         "activate" => {
             load_language(&shared);
@@ -1839,16 +1784,6 @@ fn handle_request(shared: Arc<Shared>, payload: Value) {
         "sendEvent" => {
             let event = payload.pointer("/kind/event").cloned().unwrap_or(json!({}));
             let name = event.get("name").and_then(Value::as_str).unwrap_or("");
-            // Diagnostics only: event name and control id, never request content.
-            let mut diagnostic = format!("event {name}");
-            if let Some(control_id) = event.pointer("/payload/controlId").and_then(Value::as_str) {
-                let event_type = event
-                    .pointer("/payload/type")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                diagnostic.push_str(&format!(" control={control_id} type={event_type}"));
-            }
-            eprintln!("{diagnostic}");
             match name {
                 "ui.event" => {
                     handle_ui_event(&shared, event.get("payload").unwrap_or(&Value::Null))
