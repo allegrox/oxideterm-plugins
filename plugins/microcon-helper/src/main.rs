@@ -15,7 +15,7 @@
 //! - `dispatchCommand` answers first and opens the tab afterwards.
 
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
@@ -93,7 +93,7 @@ fn locale_json(language: &str) -> Value {
 // Host BLE session entry; sessionId may arrive as a string or a number.
 #[derive(Clone)]
 struct Session {
-    id: String,
+    session_id: String,
     device_name: Option<String>,
     device_address: Option<String>,
     connected: bool,
@@ -106,7 +106,7 @@ impl Session {
             return None;
         }
         Some(Session {
-            id: value_to_string(id),
+            session_id: value_to_string(id),
             device_name: optional_string(value.get("deviceName")),
             device_address: optional_string(value.get("deviceAddress")),
             connected: value
@@ -202,7 +202,7 @@ struct State {
     panel_countdown: u8,
     // Nodes with a live ble.onNotification subscription (status
     // characteristic); released with offNotification on deactivation.
-    notification_nodes: std::collections::HashSet<String>,
+    notification_nodes: HashSet<String>,
     selected_baud: String,
     busy: bool,
     status: StatusView,
@@ -222,7 +222,7 @@ impl State {
             overlay_generation: 0,
             panel_countdown: PANEL_REFRESH_SECS as u8,
             notification_nodes: Default::default(),
-            selected_baud: "9600".to_string(),
+            selected_baud: format!("{ASSUMED_CURRENT_BAUD}"),
             busy: false,
             status: StatusView::Key("initialStatus"),
         }
@@ -407,7 +407,7 @@ fn set_status(shared: &Shared, status: StatusView) {
 // None while a baud change owns the wait slot (keep showing the previous
 // values); a failed query yields Null so the overlay row shows placeholders
 // and the plugin's refresh countdown parks until the overlay reopens.
-fn panel_status(shared: &Arc<Shared>) -> Option<Value> {
+fn fetch_panel_status(shared: &Arc<Shared>) -> Option<Value> {
     {
         let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.busy {
@@ -445,7 +445,7 @@ fn panel_status_inner(shared: &Arc<Shared>) -> Result<Value, ()> {
         "ble",
         "write",
         json!({
-            "sessionId": session.id,
+            "sessionId": session.session_id,
             "data": format!("{command}\n"),
             "dataEncoding": "utf8",
             "serviceUuid": SERVICE_UUID,
@@ -456,7 +456,7 @@ fn panel_status_inner(shared: &Arc<Shared>) -> Result<Value, ()> {
     )
     .map_err(|_| ())?;
     let response =
-        conclude_status_wait(shared, generation, &session.id, notify_rx).map_err(|_| ())?;
+        conclude_status_wait(shared, generation, &session.session_id, notify_rx).map_err(|_| ())?;
     Ok(panel_status_from_frame(&response))
 }
 
@@ -484,7 +484,7 @@ fn ensure_status_subscription(shared: &Shared, session: &Session) -> Result<(), 
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .notification_nodes
-        .contains(&session.id);
+        .contains(&session.session_id);
     if subscribed {
         return Ok(());
     }
@@ -493,7 +493,7 @@ fn ensure_status_subscription(shared: &Shared, session: &Session) -> Result<(), 
         "ble",
         "onNotification",
         json!({
-            "sessionId": session.id,
+            "sessionId": session.session_id,
             "characteristicUuid": STATUS_UUID,
             "serviceUuid": SERVICE_UUID,
         }),
@@ -503,7 +503,7 @@ fn ensure_status_subscription(shared: &Shared, session: &Session) -> Result<(), 
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .notification_nodes
-        .insert(session.id.clone());
+        .insert(session.session_id.clone());
     Ok(())
 }
 
@@ -745,7 +745,7 @@ fn implicit_pick(shared: &Shared, sessions: &[Session]) -> Option<usize> {
                 if let Some(session_id) = active.get("sessionId") {
                     if !session_id.is_null() {
                         let wanted = value_to_string(session_id);
-                        if let Some(index) = sessions.iter().position(|s| s.id == wanted) {
+                        if let Some(index) = sessions.iter().position(|s| s.session_id == wanted) {
                             return Some(index);
                         }
                     }
@@ -796,7 +796,7 @@ fn load_sessions(shared: &Shared) {
             .state
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .selected_session_id = Some(sessions[index].id.clone());
+            .selected_session_id = Some(sessions[index].session_id.clone());
     }
 }
 
@@ -964,7 +964,7 @@ fn apply_baud_inner(shared: &Arc<Shared>) -> Result<(), String> {
             match state
                 .sessions
                 .iter()
-                .find(|session| &session.id == selected)
+                .find(|session| &session.session_id == selected)
             {
                 Some(session) => session.clone(),
                 None => {
@@ -990,7 +990,7 @@ fn apply_baud_inner(shared: &Arc<Shared>) -> Result<(), String> {
             }
         }
     };
-    let session_id = session.id.clone();
+    let session_id = session.session_id.clone();
 
     ensure_status_subscription(shared, &session)?;
 
@@ -1135,7 +1135,7 @@ fn reboot_device(shared: &Shared, session: &Session) -> Result<(), String> {
         "ble",
         "write",
         json!({
-            "sessionId": session.id,
+            "sessionId": session.session_id,
             "data": format!("{command}\n"),
             "dataEncoding": "utf8",
             "serviceUuid": SERVICE_UUID,
@@ -1144,7 +1144,7 @@ fn reboot_device(shared: &Shared, session: &Session) -> Result<(), String> {
             "timeoutMs": GATT_TIMEOUT_MS,
         }),
     )?;
-    let response = conclude_status_wait(shared, generation, &session.id, notify_rx)?;
+    let response = conclude_status_wait(shared, generation, &session.session_id, notify_rx)?;
     if response.get("ok").and_then(Value::as_bool) != Some(true) {
         return Err(response.to_string());
     }
@@ -1374,7 +1374,7 @@ fn pick_mc_session(shared: &Shared, terminal_id: Option<&str>) -> Result<Session
         .map(|entries| entries.iter().filter_map(Session::from_value).collect())
         .unwrap_or_default();
     if let Some(terminal_id) = terminal_id.filter(|id| !id.is_empty()) {
-        if let Some(session) = sessions.iter().find(|session| session.id == terminal_id) {
+        if let Some(session) = sessions.iter().find(|session| session.session_id == terminal_id) {
             return Ok(session.clone());
         }
     }
@@ -1396,7 +1396,7 @@ fn mc_status(shared: &Shared, terminal_id: Option<&str>) -> Result<String, Strin
         "ble",
         "read",
         json!({
-            "sessionId": session.id,
+            "sessionId": session.session_id,
             "characteristicUuid": STATUS_UUID,
             "serviceUuid": SERVICE_UUID,
             "encoding": "utf8",
@@ -1479,7 +1479,7 @@ fn mc_baud_inner(
         .device_name
         .clone()
         .or_else(|| session.device_address.clone())
-        .unwrap_or_else(|| session.id.clone());
+        .unwrap_or_else(|| session.session_id.clone());
     // Subscribe through the shared helper so the node is recorded for
     // offNotification on deactivate; a direct call would re-subscribe on
     // every command and leak the subscription past deactivate.
@@ -1492,7 +1492,7 @@ fn mc_baud_inner(
         "ble",
         "read",
         json!({
-            "sessionId": session.id,
+            "sessionId": session.session_id,
             "characteristicUuid": STATUS_UUID,
             "serviceUuid": SERVICE_UUID,
             "encoding": "utf8",
@@ -1521,7 +1521,7 @@ fn mc_baud_inner(
         "ble",
         "write",
         json!({
-            "sessionId": session.id,
+            "sessionId": session.session_id,
             "data": format!("{command}\n"),
             "dataEncoding": "utf8",
             "serviceUuid": SERVICE_UUID,
@@ -1530,7 +1530,7 @@ fn mc_baud_inner(
             "timeoutMs": GATT_TIMEOUT_MS,
         }),
     )?;
-    let response = conclude_status_wait(shared, generation, &session.id, notify_rx)?;
+    let response = conclude_status_wait(shared, generation, &session.session_id, notify_rx)?;
     // Same immediate telemetry publish as the tab's apply path: the /mc baud
     // change must also refresh the overlay row without waiting for a poll.
     // The ack may be a bare result without telemetry; keep the old values then.
@@ -1581,10 +1581,10 @@ fn mc_reboot_inner(shared: &Arc<Shared>, terminal_id: Option<&str>) -> Result<St
     Ok(message)
 }
 
-/// Chip states in manifest declaration order. The host stores and renders
-/// whatever state id this reports back; it never interprets the ids itself.
 const TOOLBAR_ACTION_ID: &str = "mc-helper-mode";
 const TOOLBAR_OVERLAY_STATE: &str = "overlay";
+/// Chip states in manifest declaration order. The host stores and renders
+/// whatever state id this reports back; it never interprets the ids itself.
 const TOOLBAR_STATE_ORDER: [&str; 3] = ["off", "inline", TOOLBAR_OVERLAY_STATE];
 
 fn report_next_toolbar_state(shared: &Shared, payload: &Value) {
@@ -1648,7 +1648,7 @@ fn open_overlay(shared: &Arc<Shared>, payload: &Value) {
     if payload.get("actionId").and_then(Value::as_str) != Some(TOOLBAR_ACTION_ID) {
         return;
     }
-    let session = pick_mc_session(shared, None).ok().map(|session| session.id);
+    let session = pick_mc_session(shared, None).ok().map(|session| session.session_id);
     let generation = {
         let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
         state.panel_session_id = session;
@@ -1660,7 +1660,7 @@ fn open_overlay(shared: &Arc<Shared>, payload: &Value) {
         state.overlay_generation += 1;
         state.overlay_generation
     };
-    if let Some(status) = panel_status(shared) {
+    if let Some(status) = fetch_panel_status(shared) {
         shared
             .state
             .lock()
@@ -1727,7 +1727,7 @@ fn run_panel_ticker(shared: Arc<Shared>, generation: u64) {
         if fire {
             // None means a tab operation owns the wait slot: keep showing the
             // previous telemetry instead of failing the refresh.
-            if let Some(status) = panel_status(&shared) {
+            if let Some(status) = fetch_panel_status(&shared) {
                 shared
                     .state
                     .lock()
@@ -2113,9 +2113,9 @@ mod tests {
             .filter_map(Session::from_value)
             .collect();
         assert_eq!(sessions.len(), 2);
-        assert_eq!(sessions[0].id, "s1");
+        assert_eq!(sessions[0].session_id, "s1");
         assert!(sessions[0].connected);
-        assert_eq!(sessions[1].id, "42");
+        assert_eq!(sessions[1].session_id, "42");
         assert!(!sessions[1].connected);
     }
 
