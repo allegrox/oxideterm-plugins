@@ -2056,8 +2056,9 @@ mod tests {
     }
 
     // The overlay card renders whatever schema the plugin pushes, so the
-    // status row contract (formatting, dash placeholders, visibility gating
-    // and the dropped panelStatus field) is asserted on the built schema.
+    // status row contract (formatting, dash placeholders, visibility gating)
+    // is asserted on the built schema; the dropped panelStatus field is a
+    // wire contract and asserted once in the smoke test.
     #[test]
     fn overlay_status_row_formats_values_and_follows_visibility() {
         let mut state = State::new();
@@ -2096,7 +2097,6 @@ mod tests {
             2,
             "no status row while the overlay is hidden"
         );
-        assert!(schema.get("panelStatus").is_none());
     }
 
     #[test]

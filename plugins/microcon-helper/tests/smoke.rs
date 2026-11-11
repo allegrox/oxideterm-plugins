@@ -333,8 +333,8 @@ fn full_protocol_round_trip() {
     assert_eq!(status_text, "✓ 9600 → 115200");
 
     // restart: the subscription is already live, so only the session lookup
-    // and the write go out; the device acks the exact command id (set_baud
-    // was id 1) and then drops the link.
+    // and the write go out; the device acks the exact command id and then
+    // drops the link.
     host.send(&event(
         "ui.event",
         json!({ "controlId": "restart", "type": "click" }),
@@ -373,7 +373,7 @@ fn full_protocol_round_trip() {
             .unwrap(),
         json!({}),
     );
-    let ack_frame = format!("{}\n", json!({ "type": "result", "id": 2, "ok": true }));
+    let ack_frame = format!("{}\n", json!({ "type": "result", "id": command["id"], "ok": true }));
     host.send(&event(
         "ble.notification",
         json!({ "characteristicUuid": STATUS_UUID, "data": hex_encode(ack_frame.as_bytes()) }),
