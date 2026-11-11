@@ -74,6 +74,16 @@ impl Host {
         writeln!(self.stdin, "{envelope}").expect("write frame");
     }
 
+    fn reply_error(&mut self, request_id: &str) {
+        let envelope = json!({
+            "protocolVersion": 1,
+            "requestId": Value::Null,
+            "payload": { "requestId": request_id, "result": { "status": "error",
+                "error": { "code": "rejected", "message": "no such pane", "recoverable": false } } },
+        });
+        writeln!(self.stdin, "{envelope}").expect("write frame");
+    }
+
     fn expect(&self, label: &str, matcher: impl Fn(&Value) -> bool) -> Value {
         let deadline = Duration::from_secs(5);
         let mut backlog = self.backlog.lock().unwrap();
@@ -822,4 +832,76 @@ fn mc_command_round_trip() {
 
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+#[test]
+fn toolbar_overlay_rejection_rolls_back_placeholder_row() {
+    let mut host = Host::spawn();
+    let activate_id = host.send(&json!({ "kind": { "type": "activate" } }));
+    let locale_call = host.call("getLocale");
+    host.reply(
+        locale_call
+            .pointer("/payload/requestId")
+            .and_then(Value::as_str)
+            .unwrap(),
+        json!("en"),
+    );
+    host.expect("runtimeReady", |frame| {
+        frame.pointer("/payload/type").and_then(Value::as_str) == Some("runtimeReady")
+    });
+    let _ = host.response(&activate_id);
+    let sessions_call = host.call("sessions");
+    host.reply(
+        sessions_call
+            .pointer("/payload/requestId")
+            .and_then(Value::as_str)
+            .unwrap(),
+        json!({ "sessions": [] }),
+    );
+
+    let is_tab = |frame: &Value| {
+        frame
+            .pointer("/payload/registration/kind")
+            .and_then(Value::as_str)
+            == Some("tab")
+    };
+    let has_status_row = |frame: &Value| schema_text(frame).contains("\"readout\"");
+
+    // inline -> overlay: the plugin pre-registers the schema with the
+    // placeholder status row before reporting the state, so an accepted
+    // report renders a full-height card.
+    host.send(&event(
+        "toolbar.actionClicked",
+        json!({ "actionId": "mc-helper-mode", "paneId": 1, "currentState": "inline" }),
+    ));
+    host.expect("placeholder status registration", |frame| {
+        is_tab(frame) && has_status_row(frame)
+    });
+    let report = host.call("reportActionState");
+    assert_eq!(
+        report.pointer("/payload/args/stateId"),
+        Some(&json!("overlay")),
+        "the click cycles inline to overlay"
+    );
+
+    // The host refuses the state: the plugin must undo the placeholder row,
+    // otherwise the tab keeps a frozen status row with no overlay ticker.
+    host.reply_error(
+        report
+            .pointer("/payload/requestId")
+            .and_then(Value::as_str)
+            .unwrap(),
+    );
+    // Read the live stream directly: the pre-click tab registrations are
+    // already parked in the expect() backlog, so a tab frame without the
+    // status row can only be the rollback if it arrives now.
+    loop {
+        let frame = host
+            .frames
+            .recv_timeout(Duration::from_secs(5))
+            .expect("plugin stream alive");
+        if is_tab(&frame) && !has_status_row(&frame) {
+            break;
+        }
+    }
 }

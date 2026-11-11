@@ -1628,7 +1628,7 @@ fn report_next_toolbar_state(shared: &Shared, payload: &Value) {
             .overlay_visible = true;
         register_tab_view(shared);
     }
-    let _ = call_host(
+    let reported = call_host(
         shared,
         "toolbar",
         "reportActionState",
@@ -1638,6 +1638,17 @@ fn report_next_toolbar_state(shared: &Shared, payload: &Value) {
             "stateId": next,
         }),
     );
+    if next == TOOLBAR_OVERLAY_STATE && reported.is_err() {
+        // The host refused the overlay state: undo the placeholder status row
+        // and the visibility flag, so the tab cannot end up frozen with a row
+        // no overlay ticker will ever fill.
+        shared
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .overlay_visible = false;
+        register_tab_view(shared);
+    }
 }
 
 // Overlay lifecycle: the host only signals open/close/visibility events; the
