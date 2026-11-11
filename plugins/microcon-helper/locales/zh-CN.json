@@ -17,7 +17,7 @@
   "detailTemp": "设备温度: {value}°C",
   "detailJoiner": "，",
   "baudApplied": "✓ {from} → {to}",
-  "baudRolledBack": "✗ {from} → {to}，已退守 {actual}",
+  "baudRolledBack": "✗ {from} → {to}，已回退至 {actual}",
   "failed": "✗ 失败：{message}",
   "busy": "已有操作正在进行。",
   "mcHelp": "{title} 命令：\n/mc status — 查看设备状态\n/mc baud <rate> — 设置波特率（1200–921600）\n/mc reboot — 重新启动当前设备\n/mc help — 显示本帮助\n* 可使用命令首字母作为简写",
