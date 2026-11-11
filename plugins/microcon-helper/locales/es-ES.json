@@ -6,7 +6,7 @@
   "apply": "Aplicar",
   "initialStatus": "Elige una velocidad en baudios y pulsa Aplicar.",
   "restartButton": "Reiniciar dispositivo",
-  "restartDone": "Dispositivo reiniciado. Vuelve a conectarte.",
+  "restartDone": "Dispositivo reiniciado. Vuelve a conectarlo.",
   "outOfRange": "✗ La velocidad en baudios está fuera del rango ({min}–{max}).",
   "noSession": "✗ No se encontró ninguna sesión BLE. Conecta primero el dispositivo en un terminal.",
   "applying": "Enviando set_baud {baud} (era {expected}{assumed})…",
