@@ -302,7 +302,7 @@ fn full_protocol_round_trip() {
     );
     assert_eq!(args["dataEncoding"], json!("utf8"));
     assert_eq!(args["writeType"], json!("withResponse"));
-    assert_eq!(args["nodeId"], json!("s1"));
+    assert_eq!(args["sessionId"], json!("s1"));
     host.reply(
         write_call
             .pointer("/payload/requestId")
@@ -365,7 +365,7 @@ fn full_protocol_round_trip() {
     assert_eq!(command["type"], json!("restart"));
     assert_eq!(command["confirm"], json!("restart"));
     assert!(command["id"].is_number(), "acked by exact command id");
-    assert_eq!(args["nodeId"], json!("s1"));
+    assert_eq!(args["sessionId"], json!("s1"));
     host.reply(
         write_call
             .pointer("/payload/requestId")
@@ -541,7 +541,7 @@ fn full_protocol_round_trip() {
 
     let stop_id = host.send(&json!({ "kind": { "type": "deactivate" } }));
     let off = host.call("offNotification");
-    assert_eq!(off.pointer("/payload/args/nodeId"), Some(&json!("s1")));
+    assert_eq!(off.pointer("/payload/args/sessionId"), Some(&json!("s1")));
     assert_eq!(
         off.pointer("/payload/args/characteristicUuid"),
         Some(&json!(STATUS_UUID))
@@ -649,7 +649,7 @@ fn mc_command_round_trip() {
     );
     let read_call = host.call("read");
     assert_eq!(
-        read_call.pointer("/payload/args/nodeId"),
+        read_call.pointer("/payload/args/sessionId"),
         Some(&json!("t9"))
     );
     assert_eq!(
@@ -729,7 +729,7 @@ fn mc_command_round_trip() {
     );
     let subscribe = host.call("onNotification");
     assert_eq!(
-        subscribe.pointer("/payload/args/nodeId"),
+        subscribe.pointer("/payload/args/sessionId"),
         Some(&json!("t9"))
     );
     host.reply(
@@ -742,7 +742,7 @@ fn mc_command_round_trip() {
 
     let read_call = host.call("read");
     assert_eq!(
-        read_call.pointer("/payload/args/nodeId"),
+        read_call.pointer("/payload/args/sessionId"),
         Some(&json!("t9"))
     );
     host.reply(
@@ -754,7 +754,7 @@ fn mc_command_round_trip() {
     );
     let write_call = host.call("write");
     let args = &write_call["payload"]["args"];
-    assert_eq!(args["nodeId"], json!("t9"));
+    assert_eq!(args["sessionId"], json!("t9"));
     assert_eq!(
         args["characteristicUuid"],
         json!("b7e70002-b5a3-f393-e0a9-e50e24dcca9e")
@@ -810,7 +810,7 @@ fn mc_command_round_trip() {
     // answering; the binary exits after the release is acknowledged.
     let stop_id = host.send(&json!({ "kind": { "type": "deactivate" } }));
     let off = host.call("offNotification");
-    assert_eq!(off.pointer("/payload/args/nodeId"), Some(&json!("t9")));
+    assert_eq!(off.pointer("/payload/args/sessionId"), Some(&json!("t9")));
     assert_eq!(
         off.pointer("/payload/args/characteristicUuid"),
         Some(&json!(STATUS_UUID))

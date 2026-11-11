@@ -445,7 +445,7 @@ fn panel_status_inner(shared: &Arc<Shared>) -> Result<Value, ()> {
         "ble",
         "write",
         json!({
-            "nodeId": session.id,
+            "sessionId": session.id,
             "data": format!("{command}\n"),
             "dataEncoding": "utf8",
             "serviceUuid": SERVICE_UUID,
@@ -493,7 +493,7 @@ fn ensure_status_subscription(shared: &Shared, session: &Session) -> Result<(), 
         "ble",
         "onNotification",
         json!({
-            "nodeId": session.id,
+            "sessionId": session.id,
             "characteristicUuid": STATUS_UUID,
             "serviceUuid": SERVICE_UUID,
         }),
@@ -990,7 +990,7 @@ fn apply_baud_inner(shared: &Arc<Shared>) -> Result<(), String> {
             }
         }
     };
-    let node_id = session.id.clone();
+    let session_id = session.id.clone();
 
     ensure_status_subscription(shared, &session)?;
 
@@ -1003,7 +1003,7 @@ fn apply_baud_inner(shared: &Arc<Shared>) -> Result<(), String> {
         "ble",
         "read",
         json!({
-            "nodeId": node_id,
+            "sessionId": session_id,
             "characteristicUuid": STATUS_UUID,
             "serviceUuid": SERVICE_UUID,
             "encoding": "utf8",
@@ -1044,7 +1044,7 @@ fn apply_baud_inner(shared: &Arc<Shared>) -> Result<(), String> {
         "ble",
         "write",
         json!({
-            "nodeId": node_id,
+            "sessionId": session_id,
             "data": format!("{command}\n"),
             "dataEncoding": "utf8",
             "serviceUuid": SERVICE_UUID,
@@ -1054,7 +1054,7 @@ fn apply_baud_inner(shared: &Arc<Shared>) -> Result<(), String> {
         }),
     )?;
 
-    let response = conclude_status_wait(shared, generation, &node_id, notify_rx)?;
+    let response = conclude_status_wait(shared, generation, &session_id, notify_rx)?;
     // The device ack doubles as fresh telemetry: publish it immediately so the
     // panel status row reflects the new baud (and battery/temperature) without
     // waiting for the next poll. Bare result acks carry no baud and keep the
@@ -1135,7 +1135,7 @@ fn reboot_device(shared: &Shared, session: &Session) -> Result<(), String> {
         "ble",
         "write",
         json!({
-            "nodeId": session.id,
+            "sessionId": session.id,
             "data": format!("{command}\n"),
             "dataEncoding": "utf8",
             "serviceUuid": SERVICE_UUID,
@@ -1396,7 +1396,7 @@ fn mc_status(shared: &Shared, terminal_id: Option<&str>) -> Result<String, Strin
         "ble",
         "read",
         json!({
-            "nodeId": session.id,
+            "sessionId": session.id,
             "characteristicUuid": STATUS_UUID,
             "serviceUuid": SERVICE_UUID,
             "encoding": "utf8",
@@ -1492,7 +1492,7 @@ fn mc_baud_inner(
         "ble",
         "read",
         json!({
-            "nodeId": session.id,
+            "sessionId": session.id,
             "characteristicUuid": STATUS_UUID,
             "serviceUuid": SERVICE_UUID,
             "encoding": "utf8",
@@ -1521,7 +1521,7 @@ fn mc_baud_inner(
         "ble",
         "write",
         json!({
-            "nodeId": session.id,
+            "sessionId": session.id,
             "data": format!("{command}\n"),
             "dataEncoding": "utf8",
             "serviceUuid": SERVICE_UUID,
@@ -1893,13 +1893,13 @@ fn handle_request(shared: Arc<Shared>, payload: Value) {
                     .into_iter()
                     .collect()
             };
-            for node_id in nodes {
+            for session_id in nodes {
                 let _ = call_host(
                     &shared,
                     "ble",
                     "offNotification",
                     json!({
-                        "nodeId": node_id,
+                        "sessionId": session_id,
                         "characteristicUuid": STATUS_UUID,
                         "serviceUuid": SERVICE_UUID,
                     }),
