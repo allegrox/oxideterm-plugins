@@ -344,7 +344,7 @@ fn call_host(shared: &Shared, namespace: &str, method: &str, args: Value) -> Res
     shared
         .pending_host
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .insert(request_id.clone(), tx);
     write_frame(
         shared,
@@ -455,7 +455,8 @@ fn panel_status_inner(shared: &Arc<Shared>) -> Result<Value, ()> {
         }),
     )
     .map_err(|_| ())?;
-    let response = conclude_status_wait(shared, generation, notify_rx).map_err(|_| ())?;
+    let response =
+        conclude_status_wait(shared, generation, &session.id, notify_rx).map_err(|_| ())?;
     Ok(panel_status_from_frame(&response))
 }
 
@@ -481,7 +482,7 @@ fn ensure_status_subscription(shared: &Shared, session: &Session) -> Result<(), 
     let subscribed = shared
         .state
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .notification_nodes
         .contains(&session.id);
     if subscribed {
@@ -500,7 +501,7 @@ fn ensure_status_subscription(shared: &Shared, session: &Session) -> Result<(), 
     shared
         .state
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .notification_nodes
         .insert(session.id.clone());
     Ok(())
@@ -829,6 +830,7 @@ fn arm_status_wait(
 fn conclude_status_wait(
     shared: &Shared,
     generation: u64,
+    session_id: &str,
     rx: mpsc::Receiver<Value>,
 ) -> Result<Value, String> {
     match rx.recv_timeout(Duration::from_millis(RESPONSE_TIMEOUT_MS)) {
@@ -842,6 +844,18 @@ fn conclude_status_wait(
             if matches!(&*pending, Some((registered, ..)) if *registered == generation) {
                 *pending = None;
             }
+            // A session closed and reopened under the same id leaves the host
+            // route torn down while notification_nodes still lists the id, so
+            // every later command would time out against a dead subscription.
+            // Drop the bookkeeping so the next ensure_status_subscription
+            // re-subscribes; a merely slow device tolerates the redundant
+            // (idempotent) onNotification.
+            shared
+                .state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .notification_nodes
+                .remove(session_id);
             let message = shared
                 .state
                 .lock()
@@ -894,7 +908,7 @@ fn handle_ble_notification(shared: &Shared, payload: &Value) {
                         shared
                             .state
                             .lock()
-                            .unwrap()
+                            .unwrap_or_else(|e| e.into_inner())
                             .selected_baud
                             .parse::<i64>()
                             .ok()
@@ -1053,7 +1067,7 @@ fn apply_baud_inner(shared: &Arc<Shared>) -> Result<(), String> {
         }),
     )?;
 
-    let response = conclude_status_wait(shared, generation, notify_rx)?;
+    let response = conclude_status_wait(shared, generation, &node_id, notify_rx)?;
     // The device ack doubles as fresh telemetry: publish it immediately so the
     // panel status row reflects the new baud (and battery/temperature) without
     // waiting for the next poll. Bare result acks carry no baud and keep the
@@ -1143,7 +1157,7 @@ fn reboot_device(shared: &Shared, session: &Session) -> Result<(), String> {
             "timeoutMs": GATT_TIMEOUT_MS,
         }),
     )?;
-    let response = conclude_status_wait(shared, generation, notify_rx)?;
+    let response = conclude_status_wait(shared, generation, &session.id, notify_rx)?;
     if response.get("ok").and_then(Value::as_bool) != Some(true) {
         return Err(response.to_string());
     }
@@ -1335,7 +1349,7 @@ fn run_mc_command(
             let message = shared
                 .state
                 .lock()
-                .unwrap()
+                .unwrap_or_else(|e| e.into_inner())
                 .t("mcUnknown", &[("command", other.to_string())]);
             Err(message)
         }
@@ -1525,7 +1539,7 @@ fn mc_baud_inner(
             "timeoutMs": GATT_TIMEOUT_MS,
         }),
     )?;
-    let response = conclude_status_wait(shared, generation, notify_rx)?;
+    let response = conclude_status_wait(shared, generation, &session.id, notify_rx)?;
     // Same immediate telemetry publish as the tab's apply path: the /mc baud
     // change must also refresh the overlay row without waiting for a poll.
     // The ack may be a bare result without telemetry; keep the old values then.
@@ -1937,6 +1951,13 @@ fn main() {
                 let _ = sender.send(payload.get("result").cloned().unwrap_or(Value::Null));
                 continue;
             }
+            // The waiter timed out and the call was already answered
+            // locally. Host replies carry `result` and no `kind`, so drop a
+            // late frame instead of misrouting it as a request (which would
+            // emit a bogus unsupported_request error against an answered id).
+            if payload.get("kind").is_none() && payload.get("result").is_some() {
+                continue;
+            }
         }
         let _ = requests_tx.send(payload.clone());
     }
@@ -2299,5 +2320,38 @@ mod tests {
         handle_ble_notification(&shared, &frame(&ack));
         let resolved = rx.try_recv().expect("the exact ack id must resolve");
         assert_eq!(resolved["ok"], json!(true));
+    }
+
+    #[test]
+    fn status_wait_timeout_drops_subscription_bookkeeping_for_resubscribe() {
+        let shared = Shared::new();
+        shared
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .notification_nodes
+            .insert("s1".to_string());
+        // No notification arrives, as after a session reopened under the same
+        // id with the host route gone: the wait must time out...
+        let (generation, rx) = arm_status_wait(&shared, 42, WaitMatch::AckIdOnly);
+        let message = conclude_status_wait(&shared, generation, "s1", rx)
+            .expect_err("an unanswered wait must time out");
+        assert_eq!(
+            message,
+            locale_json("en")["responseTimeout"]
+                .as_str()
+                .expect("bundled en locale carries responseTimeout")
+        );
+        // ...and drop the stale entry so the next command re-subscribes;
+        // keeping it would pin every command to the dead subscription.
+        let state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(!state.notification_nodes.contains("s1"));
+        assert!(
+            shared
+                .pending_notify
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_none()
+        );
     }
 }
