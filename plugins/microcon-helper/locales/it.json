@@ -24,5 +24,13 @@
   "mcUnknown": "Comando sconosciuto: {command} — prova /mc help",
   "mcBaudUsage": "Uso: /mc baud <rate> (1200–921600)",
   "mcBaudOk": "✓ Baud rate impostato su {baud} → {where}",
-  "mcStatusBadFrame": "Impossibile interpretare la trama di stato del dispositivo."
+  "mcStatusBadFrame": "Impossibile interpretare la trama di stato del dispositivo.",
+  "toolbarButton": "MC Helper",
+  "toolbarModeOff": "Disattivato",
+  "toolbarModeInline": "In linea",
+  "toolbarModeOverlay": "Sovrapposto",
+  "toolbarUnavailable": "Il plugin MicroCon Helper non è installato o è disabilitato.",
+  "statusBaud": "Baud rate attuale",
+  "statusBattery": "Livello batteria",
+  "statusTemp": "Temperatura del dispositivo"
 }

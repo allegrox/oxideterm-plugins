@@ -24,5 +24,13 @@
   "mcUnknown": "Unknown command: {command} — try /mc help",
   "mcBaudUsage": "Usage: /mc baud <rate> (1200–921600)",
   "mcBaudOk": "✓ Baud rate set to {baud} → {where}",
-  "mcStatusBadFrame": "Device status frame could not be parsed."
+  "mcStatusBadFrame": "Device status frame could not be parsed.",
+  "toolbarButton": "MC Helper",
+  "toolbarModeOff": "Off",
+  "toolbarModeInline": "Inline",
+  "toolbarModeOverlay": "Overlay",
+  "toolbarUnavailable": "The MicroCon Helper plugin is not installed or is disabled.",
+  "statusBaud": "Current baud rate",
+  "statusBattery": "Battery level",
+  "statusTemp": "Device temperature"
 }

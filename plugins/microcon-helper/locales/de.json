@@ -24,5 +24,13 @@
   "mcUnknown": "Unbekannter Befehl: {command} — siehe /mc help",
   "mcBaudUsage": "Verwendung: /mc baud <rate> (1200–921600)",
   "mcBaudOk": "✓ Baudrate auf {baud} → {where} gesetzt",
-  "mcStatusBadFrame": "Gerätestatusrahmen konnte nicht ausgewertet werden."
+  "mcStatusBadFrame": "Gerätestatusrahmen konnte nicht ausgewertet werden.",
+  "toolbarButton": "MC Helper",
+  "toolbarModeOff": "Aus",
+  "toolbarModeInline": "Inline",
+  "toolbarModeOverlay": "Overlay",
+  "toolbarUnavailable": "Das MicroCon Helper Plugin ist nicht installiert oder deaktiviert.",
+  "statusBaud": "Aktuelle Baudrate",
+  "statusBattery": "Batterieladung",
+  "statusTemp": "Gerätetemperatur"
 }

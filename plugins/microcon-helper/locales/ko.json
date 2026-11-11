@@ -24,5 +24,13 @@
   "mcUnknown": "알 수 없는 명령: {command}(/mc help 참고)",
   "mcBaudUsage": "사용법: /mc baud <rate>(1200–921600)",
   "mcBaudOk": "✓ 보레이트가 {baud} → {where}로 설정되었습니다",
-  "mcStatusBadFrame": "장치 상태 프레임을 해석할 수 없습니다."
+  "mcStatusBadFrame": "장치 상태 프레임을 해석할 수 없습니다.",
+  "toolbarButton": "MC 헬퍼",
+  "toolbarModeOff": "끄기",
+  "toolbarModeInline": "인라인",
+  "toolbarModeOverlay": "오버레이",
+  "toolbarUnavailable": "MicroCon Helper 플러그인이 설치되지 않았거나 비활성화되어 있습니다",
+  "statusBaud": "현재 보레이트",
+  "statusBattery": "배터리 잔량",
+  "statusTemp": "장치 온도"
 }

@@ -43,6 +43,9 @@ const RESPONSE_TIMEOUT_MS: u64 = 5000;
 // The host silently drops calls outside its allow-list; the timeout keeps the
 // UI from hanging forever on such calls.
 const HOST_CALL_TIMEOUT_MS: u64 = 8000;
+// Overlay telemetry cadence, migrated from the host's panel refresh loop:
+// the plugin now owns the countdown and the periodic get_status poll.
+const PANEL_REFRESH_SECS: u64 = 10;
 
 const TAB_ID: &str = "microcon-helper";
 const MANIFEST: &str = include_str!("../plugin.json");
@@ -182,12 +185,21 @@ struct State {
     sessions: Vec<Session>,
     selected_session_id: Option<String>,
     sessions_note: Option<String>,
-    // Machine-readable telemetry for the host floating panel; Null renders
-    // placeholders until the first refresh succeeds.
+    // Machine-readable telemetry rendered in the overlay card's status row;
+    // Null parks the refresh countdown until the overlay reopens.
     panel_status: Value,
-    // Session captured when the floating panel opens; panel refreshes reuse
-    // it so focusing another terminal cannot silently move the binding.
+    // Session captured when the overlay opens; overlay refreshes reuse it so
+    // focusing another terminal cannot silently move the binding.
     panel_session_id: Option<String>,
+    // Overlay refresh ownership moved from the host to the plugin: the
+    // ticker thread of the current generation runs the countdown and the
+    // periodic get_status while the overlay is open (overlay_active), and
+    // freezes them while the anchor pane lost focus (overlay_visible).
+    // A newer open_overlay bumps the generation so an older loop exits.
+    overlay_active: bool,
+    overlay_visible: bool,
+    overlay_generation: u64,
+    panel_countdown: u8,
     // Nodes with a live ble.onNotification subscription (status
     // characteristic); released with offNotification on deactivation.
     notification_nodes: std::collections::HashSet<String>,
@@ -205,6 +217,10 @@ impl State {
             sessions_note: None,
             panel_status: Value::Null,
             panel_session_id: None,
+            overlay_active: false,
+            overlay_visible: false,
+            overlay_generation: 0,
+            panel_countdown: PANEL_REFRESH_SECS as u8,
             notification_nodes: Default::default(),
             selected_baud: "9600".to_string(),
             busy: false,
@@ -424,7 +440,8 @@ fn set_status(shared: &Shared, status: StatusView) {
 // and resolves through the same status-notification slot as set_baud, so
 // baud/battery/temperature always reflect the device's latest state. Returns
 // None while a baud change owns the wait slot (keep showing the previous
-// values); a failed query yields Null so the host panel shows placeholders.
+// values); a failed query yields Null so the overlay row shows placeholders
+// and the plugin's refresh countdown parks until the overlay reopens.
 fn panel_status(shared: &Arc<Shared>) -> Option<Value> {
     {
         let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -572,6 +589,66 @@ fn render_status(state: &State) -> String {
     }
 }
 
+// The overlay card's telemetry row. The host dropped its own status bar, so
+// the plugin renders the readouts inside the schema pushed to the overlay
+// tab; labels come from the active locale bundle and missing values use the
+// same dash placeholder the host bar showed.
+fn panel_status_row(state: &State) -> Value {
+    let telemetry = if state.panel_status.is_object() {
+        &state.panel_status
+    } else {
+        &Value::Null
+    };
+    let number = |name: &str| telemetry.get(name).and_then(Value::as_f64);
+    // Icon + value readouts with the hint as a host-rendered tooltip,
+    // mirroring the original host status bar: the icon carries meaning so
+    // the row stays one line in every locale.
+    let readout = |id: &str, icon: &str, hint_key: &str, value: Option<String>| {
+        json!({
+            "kind": "readout",
+            "id": id,
+            "icon": icon,
+            "tooltip": state.t(hint_key, &[]),
+            "text": value.unwrap_or_else(|| "–".to_string()),
+        })
+    };
+    let mut children = vec![
+        readout(
+            "panelStatusBaud",
+            "square-activity",
+            "statusBaud",
+            number("baud").map(fmt_number),
+        ),
+        readout(
+            "panelStatusBattery",
+            "battery-full",
+            "statusBattery",
+            number("batteryPercent").map(|v| format!("{v:.0}%")),
+        ),
+        readout(
+            "panelStatusTemp",
+            "thermometer",
+            "statusTemp",
+            number("temperatureC").map(|v| format!("{v:.1}°C")),
+        ),
+        json!({ "kind": "spacer", "id": "panelStatusSpacer" }),
+    ];
+    // The countdown renders only while telemetry is live, matching the host
+    // bar this row replaces: a parked refresh has no next poll to announce.
+    if state.panel_status.is_object() {
+        children.push(json!({
+            "kind": "readout",
+            "id": "panelRefreshCountdown",
+            "text": format!("{}s", state.panel_countdown),
+        }));
+    }
+    json!({
+        "kind": "row",
+        "id": "panelStatusRow",
+        "children": children,
+    })
+}
+
 fn build_schema(state: &State) -> Value {
     let status_text = if state.sessions.is_empty() {
         match &state.sessions_note {
@@ -581,52 +658,55 @@ fn build_schema(state: &State) -> Value {
     } else {
         render_status(state)
     };
+    let mut controls = vec![
+        json!({
+            "kind": "row",
+            "id": "baudRow",
+            "children": [
+                {
+                    "kind": "select",
+                    "id": "baud",
+                    "label": state.t("baudLabel", &[]),
+                    "value": state.selected_baud.clone(),
+                    "options": BAUD_RATES
+                        .iter()
+                        .map(|rate| json!({ "label": rate.to_string(), "value": rate.to_string() }))
+                        .collect::<Vec<Value>>(),
+                },
+                {
+                    "kind": "button",
+                    "id": "apply",
+                    "label": state.t("apply", &[]),
+                    "loading": state.busy,
+                },
+                // Pushes the restart button to the row's far edge.
+                { "kind": "spacer" },
+                {
+                    "kind": "button",
+                    "id": "restart",
+                    "label": state.t("restartButton", &[]),
+                    "loading": state.busy,
+                },
+            ],
+        }),
+        json!({
+            "kind": "markdown",
+            "id": "status",
+            "text": status_text,
+        }),
+    ];
+    if state.overlay_visible {
+        controls.push(panel_status_row(state));
+    }
     json!({
         "componentVersion": 1,
         "kind": "form",
         "title": state.t("title", &[]),
         "description": state.t("description", &[]),
-        "panelStatus": state.panel_status.clone(),
         "sections": [
             {
                 "id": "main",
-                "controls": [
-                    {
-                        "kind": "row",
-                        "id": "baudRow",
-                        "children": [
-                            {
-                                "kind": "select",
-                                "id": "baud",
-                                "label": state.t("baudLabel", &[]),
-                                "value": state.selected_baud.clone(),
-                                "options": BAUD_RATES
-                                    .iter()
-                                    .map(|rate| json!({ "label": rate.to_string(), "value": rate.to_string() }))
-                                    .collect::<Vec<Value>>(),
-                            },
-                            {
-                                "kind": "button",
-                                "id": "apply",
-                                "label": state.t("apply", &[]),
-                                "loading": state.busy,
-                            },
-                            // Pushes the restart button to the row's far edge.
-                            { "kind": "spacer" },
-                            {
-                                "kind": "button",
-                                "id": "restart",
-                                "label": state.t("restartButton", &[]),
-                                "loading": state.busy,
-                            },
-                        ],
-                    },
-                    {
-                        "kind": "markdown",
-                        "id": "status",
-                        "text": status_text,
-                    },
-                ],
+                "controls": controls,
             },
         ],
     })
@@ -1053,7 +1133,7 @@ fn restart_device(shared: Arc<Shared>) {
 }
 
 fn restart_inner(shared: &Arc<Shared>) -> Result<(), String> {
-    // The restart button lives in the floating panel, so prefer the panel's
+    // The restart button also serves the overlay, so prefer the overlay's
     // bound session and fall back to implicit resolution after a reconnect.
     let bound = shared
         .state
@@ -1064,7 +1144,7 @@ fn restart_inner(shared: &Arc<Shared>) -> Result<(), String> {
     let session = pick_mc_session(shared, bound.as_deref())?;
     reboot_device(shared, &session)?;
     // The device drops the BLE link right after acking; clearing the telemetry
-    // makes the host panel hide its countdown and stop the refresh loop.
+    // parks the overlay refresh countdown until the overlay reopens.
     shared
         .state
         .lock()
@@ -1491,7 +1571,7 @@ fn mc_baud_inner(
     )?;
     let response = conclude_status_wait(shared, generation, notify_rx)?;
     // Same immediate telemetry publish as the tab's apply path: the /mc baud
-    // change must also refresh the floating panel without waiting for a poll.
+    // change must also refresh the overlay row without waiting for a poll.
     // The ack may be a bare result without telemetry; keep the old values then.
     if response.get("baud").is_some() {
         shared
@@ -1525,8 +1605,8 @@ fn mc_reboot(shared: &Arc<Shared>, terminal_id: Option<&str>) -> Result<String, 
 fn mc_reboot_inner(shared: &Arc<Shared>, terminal_id: Option<&str>) -> Result<String, String> {
     let session = pick_mc_session(shared, terminal_id)?;
     reboot_device(shared, &session)?;
-    // Same panel cleanup as the button path: the BLE link is gone after the
-    // ack, so the floating panel must hide its countdown and stop refreshing.
+    // Same telemetry cleanup as the button path: the BLE link is gone after
+    // the ack, so the overlay refresh countdown parks.
     shared
         .state
         .lock()
@@ -1538,6 +1618,153 @@ fn mc_reboot_inner(shared: &Arc<Shared>, terminal_id: Option<&str>) -> Result<St
         .unwrap_or_else(|e| e.into_inner())
         .t("restartDone", &[]);
     Ok(message)
+}
+
+/// Chip states in manifest declaration order. The host stores and renders
+/// whatever state id this reports back; it never interprets the ids itself.
+const TOOLBAR_ACTION_ID: &str = "mc-helper-mode";
+const TOOLBAR_OVERLAY_STATE: &str = "overlay";
+const TOOLBAR_STATE_ORDER: [&str; 3] = ["off", "inline", TOOLBAR_OVERLAY_STATE];
+
+fn report_next_toolbar_state(shared: &Shared, payload: &Value) {
+    if payload.get("actionId").and_then(Value::as_str) != Some(TOOLBAR_ACTION_ID) {
+        return;
+    }
+    let Some(pane_id) = payload.get("paneId").and_then(Value::as_u64) else {
+        return;
+    };
+    let current = payload
+        .get("currentState")
+        .and_then(Value::as_str)
+        .unwrap_or(TOOLBAR_STATE_ORDER[0]);
+    let index = TOOLBAR_STATE_ORDER
+        .iter()
+        .position(|state| *state == current)
+        .unwrap_or(0);
+    let next = TOOLBAR_STATE_ORDER[(index + 1) % TOOLBAR_STATE_ORDER.len()];
+    // The host renders the overlay card as soon as it accepts this reported
+    // state, before the overlayOpened event reaches open_overlay. Register
+    // the schema with the status row first (placeholder values until
+    // telemetry arrives) so the card keeps its final height on first paint.
+    if next == TOOLBAR_OVERLAY_STATE {
+        shared
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .overlay_visible = true;
+        register_tab_view(shared);
+    }
+    let _ = call_host(
+        shared,
+        "toolbar",
+        "reportActionState",
+        json!({
+            "actionId": TOOLBAR_ACTION_ID,
+            "paneId": pane_id,
+            "stateId": next,
+        }),
+    );
+}
+
+// Overlay lifecycle: the host only signals open/close/visibility events; the
+// refresh countdown and the periodic get_status poll belong to this plugin.
+// The opening pane's session is captured once (the toolbar chip belongs to
+// that pane, so it holds focus right now) and a fresh get_status runs
+// immediately: a parked panel (Null telemetry freezes the countdown) can
+// only un-park through this open-time poll or a later successful tab apply.
+fn open_overlay(shared: &Arc<Shared>, payload: &Value) {
+    if payload.get("actionId").and_then(Value::as_str) != Some(TOOLBAR_ACTION_ID) {
+        return;
+    }
+    let session = pick_mc_session(shared, None).ok().map(|session| session.id);
+    let generation = {
+        let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.panel_session_id = session;
+        state.overlay_active = true;
+        // A freshly opened overlay is shown; the host follows up with
+        // visibility changes only when they actually happen.
+        state.overlay_visible = true;
+        state.panel_countdown = PANEL_REFRESH_SECS as u8;
+        state.overlay_generation += 1;
+        state.overlay_generation
+    };
+    if let Some(status) = panel_status(shared) {
+        shared
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .panel_status = status;
+    }
+    register_tab_view(shared);
+    run_panel_ticker(Arc::clone(shared), generation);
+}
+
+fn close_overlay(shared: &Arc<Shared>, payload: &Value) {
+    if payload.get("actionId").and_then(Value::as_str) != Some(TOOLBAR_ACTION_ID) {
+        return;
+    }
+    {
+        let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.overlay_active = false;
+        state.overlay_visible = false;
+        state.panel_session_id = None;
+    }
+    // The ticker observes overlay_active at its next 1s tick and exits; the
+    // row must already be gone from the pushed schema.
+    register_tab_view(shared);
+}
+
+fn set_overlay_visibility(shared: &Arc<Shared>, payload: &Value) {
+    if payload.get("actionId").and_then(Value::as_str) != Some(TOOLBAR_ACTION_ID) {
+        return;
+    }
+    let Some(visible) = payload.get("visible").and_then(Value::as_bool) else {
+        return;
+    };
+    shared
+        .state
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .overlay_visible = visible;
+}
+
+// Single-instance guard: exactly one loop runs per open_overlay generation.
+// A superseded or closed overlay breaks at the next tick, so older loops
+// retire without ever polling the device again. All BLE work happens here,
+// never on the protocol reader thread.
+fn run_panel_ticker(shared: Arc<Shared>, generation: u64) {
+    loop {
+        thread::sleep(Duration::from_secs(1));
+        let fire = {
+            let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+            if !state.overlay_active || state.overlay_generation != generation {
+                break;
+            }
+            // Frozen while the anchor pane lost focus; parked while the last
+            // get_status failed — the countdown only runs on live telemetry.
+            if state.overlay_visible && state.panel_status.is_object() {
+                state.panel_countdown -= 1;
+            }
+            if state.panel_countdown == 0 {
+                state.panel_countdown = PANEL_REFRESH_SECS as u8;
+                true
+            } else {
+                false
+            }
+        };
+        if fire {
+            // None means a tab operation owns the wait slot: keep showing the
+            // previous telemetry instead of failing the refresh.
+            if let Some(status) = panel_status(&shared) {
+                shared
+                    .state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .panel_status = status;
+            }
+        }
+        register_tab_view(&shared);
+    }
 }
 
 fn handle_ui_event(shared: &Arc<Shared>, payload: &Value) {
@@ -1631,6 +1858,31 @@ fn handle_request(shared: Arc<Shared>, payload: Value) {
                     load_language(&shared);
                     register_tab_view(&shared);
                 }
+                "toolbar.actionClicked" => {
+                    // The host delivers chip clicks as opaque events and the
+                    // plugin owns the state semantics. The report call must
+                    // not block the reader thread that will deliver the
+                    // host's response.
+                    let click = event.get("payload").cloned().unwrap_or(json!({}));
+                    let shared = Arc::clone(&shared);
+                    thread::spawn(move || report_next_toolbar_state(&shared, &click));
+                }
+                "toolbar.overlayOpened" => {
+                    // Binding and the first telemetry poll hit the device, so
+                    // they run on the overlay's background thread; this also
+                    // becomes the ticker loop for this overlay generation.
+                    let info = event.get("payload").cloned().unwrap_or(json!({}));
+                    let shared = Arc::clone(&shared);
+                    thread::spawn(move || open_overlay(&shared, &info));
+                }
+                "toolbar.overlayClosed" => {
+                    let info = event.get("payload").cloned().unwrap_or(json!({}));
+                    close_overlay(&shared, &info);
+                }
+                "toolbar.overlayVisibilityChanged" => {
+                    let info = event.get("payload").cloned().unwrap_or(json!({}));
+                    set_overlay_visibility(&shared, &info);
+                }
                 _ => {}
             }
             respond_ok(&shared, &request_id, json!({ "received": name }));
@@ -1655,32 +1907,6 @@ fn handle_request(shared: Arc<Shared>, payload: Value) {
                     .map(str::to_string);
                 let value = feed_input(&shared, terminal_id.as_deref(), &data);
                 respond_ok(&shared, &request_id, value);
-            } else if command == "microconHelper.bindPanel" {
-                respond_ok(&shared, &request_id, json!({}));
-                // The panel opens from the focused BLE pane's toolbar; capture
-                // that pane's session once so later refreshes cannot wander to
-                // whichever terminal happens to hold focus.
-                let session = pick_mc_session(&shared, None)
-                    .ok()
-                    .map(|session| session.id);
-                shared
-                    .state
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .panel_session_id = session;
-            } else if command == "microconHelper.refreshPanel" {
-                respond_ok(&shared, &request_id, json!({}));
-                let shared = Arc::clone(&shared);
-                thread::spawn(move || {
-                    if let Some(status) = panel_status(&shared) {
-                        shared
-                            .state
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .panel_status = status;
-                    }
-                    register_tab_view(&shared);
-                });
             } else {
                 respond_error(
                     &shared,
@@ -1846,6 +2072,50 @@ mod tests {
         assert_eq!(fmt_number(115200.0), "115200");
         assert_eq!(fmt_number(36.5), "36.5");
         assert_eq!(fmt_number(0.0), "0");
+    }
+
+    // The overlay card renders whatever schema the plugin pushes, so the
+    // status row contract (formatting, dash placeholders, visibility gating
+    // and the dropped panelStatus field) is asserted on the built schema.
+    #[test]
+    fn overlay_status_row_formats_values_and_follows_visibility() {
+        let mut state = State::new();
+        state.overlay_visible = true;
+        state.panel_status = json!({
+            "baud": 115200.0,
+            "batteryPercent": 88.0,
+            "temperatureC": Value::Null,
+        });
+        state.panel_countdown = 7;
+        let schema = build_schema(&state);
+        let controls = schema["sections"][0]["controls"].as_array().unwrap();
+        assert_eq!(controls.len(), 3, "status row appended while visible");
+        let row = &controls[2];
+        assert_eq!(row["kind"], json!("row"));
+        assert_eq!(row["id"], json!("panelStatusRow"));
+        assert_eq!(row["children"][0]["kind"], json!("readout"));
+        assert_eq!(row["children"][0]["icon"], json!("square-activity"));
+        assert_eq!(row["children"][0]["tooltip"], json!("Current baud rate"));
+        assert_eq!(row["children"][0]["text"], json!("115200"));
+        assert_eq!(row["children"][1]["icon"], json!("battery-full"));
+        assert_eq!(row["children"][1]["tooltip"], json!("Battery level"));
+        assert_eq!(row["children"][1]["text"], json!("88%"));
+        assert_eq!(
+            row["children"][2]["text"],
+            json!("–"),
+            "missing temperature renders the dash placeholder"
+        );
+        assert_eq!(row["children"][3]["kind"], json!("spacer"));
+        assert_eq!(row["children"][4]["text"], json!("7s"));
+
+        state.overlay_visible = false;
+        let schema = build_schema(&state);
+        assert_eq!(
+            schema["sections"][0]["controls"].as_array().unwrap().len(),
+            2,
+            "no status row while the overlay is hidden"
+        );
+        assert!(schema.get("panelStatus").is_none());
     }
 
     #[test]

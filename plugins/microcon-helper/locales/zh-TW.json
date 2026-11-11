@@ -24,5 +24,13 @@
   "mcUnknown": "未知命令：{command}（試試 /mc help）",
   "mcBaudUsage": "用法：/mc baud <rate>（1200–921600）",
   "mcBaudOk": "✓ 波特率已設為 {baud} → {where}",
-  "mcStatusBadFrame": "裝置狀態幀無法解析。"
+  "mcStatusBadFrame": "裝置狀態幀無法解析。",
+  "toolbarButton": "MC 助手",
+  "toolbarModeOff": "關閉",
+  "toolbarModeInline": "行內",
+  "toolbarModeOverlay": "浮窗",
+  "toolbarUnavailable": "MicroCon Helper 外掛未安裝或已停用",
+  "statusBaud": "目前波特率",
+  "statusBattery": "電池剩餘電量",
+  "statusTemp": "裝置溫度"
 }

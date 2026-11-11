@@ -24,5 +24,13 @@
   "mcUnknown": "Comando desconocido: {command} — prueba /mc help",
   "mcBaudUsage": "Uso: /mc baud <rate> (1200–921600)",
   "mcBaudOk": "✓ Velocidad en baudios establecida en {baud} → {where}",
-  "mcStatusBadFrame": "No se pudo interpretar la trama de estado del dispositivo."
+  "mcStatusBadFrame": "No se pudo interpretar la trama de estado del dispositivo.",
+  "toolbarButton": "MC Helper",
+  "toolbarModeOff": "Desactivado",
+  "toolbarModeInline": "En línea",
+  "toolbarModeOverlay": "Superpuesto",
+  "toolbarUnavailable": "El complemento MicroCon Helper no está instalado o está deshabilitado.",
+  "statusBaud": "Velocidad de baudios actual",
+  "statusBattery": "Nivel de batería",
+  "statusTemp": "Temperatura del dispositivo"
 }

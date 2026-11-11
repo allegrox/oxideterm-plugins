@@ -24,5 +24,13 @@
   "mcUnknown": "Lệnh không rõ: {command} — thử /mc help",
   "mcBaudUsage": "Cách dùng: /mc baud <rate> (1200–921600)",
   "mcBaudOk": "✓ Đã đặt tốc độ baud thành {baud} → {where}",
-  "mcStatusBadFrame": "Không thể phân tích khung trạng thái thiết bị."
+  "mcStatusBadFrame": "Không thể phân tích khung trạng thái thiết bị.",
+  "toolbarButton": "MC Helper",
+  "toolbarModeOff": "Tắt",
+  "toolbarModeInline": "Nội tuyến",
+  "toolbarModeOverlay": "Lớp phủ",
+  "toolbarUnavailable": "Tiện ích MicroCon Helper chưa được cài đặt hoặc đang bị tắt.",
+  "statusBaud": "Tốc độ baud hiện tại",
+  "statusBattery": "Mức pin còn lại",
+  "statusTemp": "Nhiệt độ thiết bị"
 }

@@ -326,13 +326,6 @@ fn full_protocol_round_trip() {
         .and_then(Value::as_str)
         .unwrap();
     assert_eq!(status_text, "✓ 9600 → 115200");
-    // The ack frame doubles as telemetry: the panel status row must update
-    // immediately, not on the next 10s poll.
-    assert_eq!(
-        done.pointer("/payload/registration/metadata/schema/panelStatus"),
-        Some(&json!({ "baud": 115200.0, "batteryPercent": 88.0, "temperatureC": 31.5 })),
-        "ack telemetry published immediately"
-    );
 
     // restart: the subscription is already live, so only the session lookup
     // and the write go out; the device acks the exact command id (set_baud
@@ -380,18 +373,155 @@ fn full_protocol_round_trip() {
         "ble.notification",
         json!({ "characteristicUuid": STATUS_UUID, "data": hex_encode(ack_frame.as_bytes()) }),
     ));
-    let restarted = host.expect("restart ack", |frame| {
+    host.expect("restart ack", |frame| {
         frame
             .pointer("/payload/registration/kind")
             .and_then(Value::as_str)
             == Some("tab")
             && schema_text(frame).contains("设备已重启")
     });
-    let schema = &restarted["payload"]["registration"]["metadata"]["schema"];
+
+    // Overlay lifecycle: the plugin owns the refresh loop. Opening binds the
+    // focused pane's session and issues a fresh get_status (which also
+    // un-parks the telemetry the restart cleared); while the overlay is
+    // visible the pushed schema carries the status row.
+    host.send(&event(
+        "toolbar.overlayOpened",
+        json!({ "actionId": "mc-helper-mode", "paneId": 1 }),
+    ));
+    // The bind resolves the implicit pick (sessions + getMetadata); the
+    // opening poll reuses the bound session id, so only a session lookup goes
+    // out and focus can no longer move the binding.
+    for expect_metadata in [true, false] {
+        let sessions_call = host.call("sessions");
+        host.reply(
+            sessions_call
+                .pointer("/payload/requestId")
+                .and_then(Value::as_str)
+                .unwrap(),
+            json!({ "sessions": [
+                { "sessionId": "s1", "deviceName": "MicroCon-A", "connected": true },
+            ] }),
+        );
+        if expect_metadata {
+            let metadata_call = host.call("getMetadata");
+            host.reply(
+                metadata_call
+                    .pointer("/payload/requestId")
+                    .and_then(Value::as_str)
+                    .unwrap(),
+                json!({}),
+            );
+        }
+    }
+    let status_write = host.call("write");
+    let status_command: Value = serde_json::from_str(
+        status_write
+            .pointer("/payload/args/data")
+            .and_then(Value::as_str)
+            .unwrap()
+            .trim(),
+    )
+    .expect("get_status JSON");
+    assert_eq!(status_command["type"], json!("get_status"));
+    host.reply(
+        status_write
+            .pointer("/payload/requestId")
+            .and_then(Value::as_str)
+            .unwrap(),
+        json!({}),
+    );
+    let telemetry_frame = format!(
+        "{}\n",
+        json!({ "type": "status", "id": status_command["id"], "baud": 9600, "batteryPercent": 88, "tempValid": true, "tempC": 31.5 })
+    );
+    host.send(&event(
+        "ble.notification",
+        json!({ "characteristicUuid": STATUS_UUID, "data": hex_encode(telemetry_frame.as_bytes()) }),
+    ));
+    let opened = host.expect("overlay status row", |frame| {
+        frame
+            .pointer("/payload/registration/kind")
+            .and_then(Value::as_str)
+            == Some("tab")
+            && schema_text(frame).contains("panelStatusRow")
+    });
+    let schema = &opened["payload"]["registration"]["metadata"]["schema"];
+    assert!(
+        schema.get("panelStatus").is_none(),
+        "the host no longer reads a panelStatus field; the plugin must not send it"
+    );
+    let row = &schema["sections"][0]["controls"][2];
+    assert_eq!(row["id"], json!("panelStatusRow"));
+    assert_eq!(row["children"][0]["icon"], json!("square-activity"));
+    assert_eq!(row["children"][0]["tooltip"], json!("当前波特率"));
+    assert_eq!(row["children"][0]["text"], json!("9600"));
+    assert_eq!(row["children"][1]["icon"], json!("battery-full"));
+    assert_eq!(row["children"][1]["tooltip"], json!("电池剩余电量"));
+    assert_eq!(row["children"][1]["text"], json!("88%"));
+    assert_eq!(row["children"][2]["icon"], json!("thermometer"));
+    assert_eq!(row["children"][2]["tooltip"], json!("设备温度"));
+    assert_eq!(row["children"][2]["text"], json!("31.5°C"));
+    assert_eq!(row["children"][3]["kind"], json!("spacer"));
+    assert_eq!(row["children"][4]["text"], json!("10s"));
+
+    // Closing drops the binding and the row; the ticker retires at its next
+    // tick without polling again.
+    host.send(&event(
+        "toolbar.overlayClosed",
+        json!({ "actionId": "mc-helper-mode", "paneId": 1 }),
+    ));
+    let closed = host.expect("overlay closed schema", |frame| {
+        frame
+            .pointer("/payload/registration/kind")
+            .and_then(Value::as_str)
+            == Some("tab")
+            && !schema_text(frame).contains("panelStatusRow")
+    });
     assert_eq!(
-        schema["panelStatus"],
-        Value::Null,
-        "telemetry cleared so the host panel parks its refresh loop"
+        closed
+            .pointer("/payload/registration/metadata/schema/sections/0/controls")
+            .and_then(Value::as_array)
+            .map(|controls| controls.len()),
+        Some(2),
+        "status row removed once the overlay closed"
+    );
+
+    // Jitter regression: cycling the chip into the overlay state must
+    // register the status row schema before the reportActionState frame, so
+    // the host's first overlay paint already has the final height. Drop the
+    // frames the ticker left in the backlog so only the click's frames are
+    // inspected.
+    host.backlog.lock().unwrap().clear();
+    host.send(&event(
+        "toolbar.actionClicked",
+        json!({ "actionId": "mc-helper-mode", "paneId": 1, "currentState": "inline" }),
+    ));
+    let saw_row = std::cell::Cell::new(false);
+    let report_call = host.expect("overlay reportActionState", |frame| {
+        if frame
+            .pointer("/payload/registration/kind")
+            .and_then(Value::as_str)
+            == Some("tab")
+            && schema_text(frame).contains("panelStatusRow")
+        {
+            saw_row.set(true);
+            return false;
+        }
+        frame.pointer("/payload/type").and_then(Value::as_str) == Some("callHostApi")
+            && frame.pointer("/payload/method").and_then(Value::as_str) == Some("reportActionState")
+    });
+    assert!(
+        saw_row.get(),
+        "the status row schema must be registered before reportActionState"
+    );
+    assert_eq!(report_call.pointer("/payload/args/stateId"), Some(&json!("overlay")));
+    host.reply(
+        report_call
+            .pointer("/payload/requestId")
+            .and_then(Value::as_str)
+            .unwrap(),
+        json!({}),
     );
 
     // health + deactivate. The subscription release (offNotification for the

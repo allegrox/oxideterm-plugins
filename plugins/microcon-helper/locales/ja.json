@@ -24,5 +24,13 @@
   "mcUnknown": "不明なコマンド：{command}（/mc help を参照）",
   "mcBaudUsage": "使い方：/mc baud <rate>（1200–921600）",
   "mcBaudOk": "✓ ボーレートを {baud} → {where} に設定しました",
-  "mcStatusBadFrame": "デバイスのステータスフレームを解析できませんでした。"
+  "mcStatusBadFrame": "デバイスのステータスフレームを解析できませんでした。",
+  "toolbarButton": "MC ヘルパー",
+  "toolbarModeOff": "オフ",
+  "toolbarModeInline": "インライン",
+  "toolbarModeOverlay": "オーバーレイ",
+  "toolbarUnavailable": "MicroCon Helper プラグインが未インストールか無効です",
+  "statusBaud": "現在のボーレート",
+  "statusBattery": "バッテリー残量",
+  "statusTemp": "デバイス温度"
 }

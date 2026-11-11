@@ -24,5 +24,13 @@
   "mcUnknown": "Commande inconnue : {command} — essayez /mc help",
   "mcBaudUsage": "Utilisation : /mc baud <rate> (1200–921600)",
   "mcBaudOk": "✓ Vitesse de transmission définie sur {baud} → {where}",
-  "mcStatusBadFrame": "Impossible d'analyser la trame d'état de l'appareil."
+  "mcStatusBadFrame": "Impossible d'analyser la trame d'état de l'appareil.",
+  "toolbarButton": "MC Helper",
+  "toolbarModeOff": "Désactivé",
+  "toolbarModeInline": "En ligne",
+  "toolbarModeOverlay": "Superposé",
+  "toolbarUnavailable": "L'extension MicroCon Helper n'est pas installée ou est désactivée.",
+  "statusBaud": "Vitesse de bauds actuelle",
+  "statusBattery": "Niveau de batterie",
+  "statusTemp": "Température de l'appareil"
 }

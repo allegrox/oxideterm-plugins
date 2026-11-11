@@ -18,6 +18,7 @@
       "terminal.write"
     ]
   },
+  "locales": "locales",
   "contributes": {
     "terminalHooks": {
       "inputInterceptor": true
@@ -27,6 +28,20 @@
         "id": "microcon-helper",
         "title": "MicroCon Helper",
         "icon": "bluetooth"
+      }
+    ],
+    "terminalToolbar": [
+      {
+        "id": "mc-helper-mode",
+        "labelKey": "toolbarButton",
+        "states": [
+          { "id": "off", "labelKey": "toolbarModeOff" },
+          { "id": "inline", "labelKey": "toolbarModeInline" },
+          { "id": "overlay", "labelKey": "toolbarModeOverlay", "overlay": true }
+        ],
+        "overlayTab": "microcon-helper",
+        "defaultState": "off",
+        "disabledHintKey": "toolbarUnavailable"
       }
     ]
   },
