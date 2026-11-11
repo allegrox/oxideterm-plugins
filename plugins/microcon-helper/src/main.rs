@@ -1857,8 +1857,15 @@ fn handle_request(shared: Arc<Shared>, payload: Value) {
                     handle_ble_notification(&shared, event.get("payload").unwrap_or(&Value::Null))
                 }
                 "i18n.languageChanged" => {
-                    load_language(&shared);
-                    register_tab_view(&shared);
+                    // The request worker also serves terminal input hooks on a
+                    // 5ms budget, so a host call that can stall until timeout
+                    // must not run here; the refresh keeps the load-then-
+                    // republish order on its own thread.
+                    let shared = Arc::clone(&shared);
+                    thread::spawn(move || {
+                        load_language(&shared);
+                        register_tab_view(&shared);
+                    });
                 }
                 "toolbar.actionClicked" => {
                     // The host delivers chip clicks as opaque events and the
