@@ -780,36 +780,23 @@ fn load_sessions(shared: &Shared) {
                 state.sessions_note = Some(state.t("failed", &[("message", message)]));
             }
         }
-        // Fall back to the implicit target when the selection is stale.
-        let selected_valid = state
-            .selected_session_id
-            .as_ref()
-            .is_some_and(|selected| state.sessions.iter().any(|s| &s.id == selected));
-        if state.selected_session_id.is_some() && !selected_valid {
-            state.selected_session_id = None;
-        }
     }
+    // The tab UI has no session picker: the target is always the implicit
+    // choice (focused terminal's BLE session > first connected > first). The
+    // former explicit-selection validity branch was a Node-era dropdown
+    // leftover that no code path could reach.
     let sessions = shared
         .state
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .sessions
         .clone();
-    if shared
-        .state
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .selected_session_id
-        .is_none()
-        && !sessions.is_empty()
-    {
-        if let Some(index) = implicit_pick(shared, &sessions) {
-            shared
-                .state
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .selected_session_id = Some(sessions[index].id.clone());
-        }
+    if let Some(index) = implicit_pick(shared, &sessions) {
+        shared
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .selected_session_id = Some(sessions[index].id.clone());
     }
 }
 
