@@ -20,7 +20,7 @@
   "baudRolledBack": "✗ {from} → {to}、{actual} に戻しました",
   "failed": "✗ 失敗：{message}",
   "busy": "別の操作が実行中です。",
-  "mcHelp": "{title} コマンド：\n/mc status — デバイスの状態を表示\n/mc baud <rate> — ボーレートを設定（1200–921600）\n/mc reboot — 現在のデバイスを再起動\n/mc help — このヘルプを表示\n* コマンドの頭文字を省略して入力できます",
+  "mcHelp": "{title} コマンド：\n/mc status — デバイスの状態を表示\n/mc baud <rate> — ボーレートを設定（1200–921600）\n/mc reboot — 現在のデバイスを再起動\n/mc help — このヘルプを表示\n* コマンドの頭文字による略記も可能です",
   "mcUnknown": "不明なコマンド：{command}（/mc help を参照）",
   "mcBaudUsage": "使い方：/mc baud <rate>（1200–921600）",
   "mcBaudOk": "✓ ボーレートを {baud} → {where} に設定しました",
