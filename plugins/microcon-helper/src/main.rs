@@ -1208,10 +1208,16 @@ fn push_erase(echo: &mut Vec<u8>, count: usize) {
 }
 
 // Feeds one interceptor chunk through the per-terminal line buffer and returns
-// the hook response: {"echo", "suppress"} to hold with local display,
-// {"echo", "text"} to erase the echo and replay, {"text"} for plain
-// passthrough, or null when nothing needs to happen.
-fn feed_input(shared: &Arc<Shared>, terminal_id: Option<&str>, data: &str) -> Value {
+// the hook response plus any "/mc" lines the caller must execute:
+// {"echo", "suppress"} to hold with local display, {"echo", "text"} to erase
+// the echo and replay, {"text"} for plain passthrough, or null when nothing
+// needs to happen. Execution is deliberately left to the caller because it
+// spawns a thread and calls the host.
+fn intercept_input(
+    shared: &Arc<Shared>,
+    terminal_id: Option<&str>,
+    data: &str,
+) -> (Value, Vec<String>) {
     let key = terminal_id.unwrap_or("").to_string();
     let mut out: Vec<u8> = Vec::new();
     let mut echo: Vec<u8> = Vec::new();
@@ -1286,10 +1292,7 @@ fn feed_input(shared: &Arc<Shared>, terminal_id: Option<&str>, data: &str) -> Va
             }
         }
     }
-    for line in executed_lines {
-        execute_mc_command(shared, terminal_id.map(str::to_string), line);
-    }
-    match (!echo.is_empty(), !out.is_empty()) {
+    let response = match (!echo.is_empty(), !out.is_empty()) {
         (false, false) => json!(null),
         (true, false) => json!({
             "echo": String::from_utf8_lossy(&echo).to_string(),
@@ -1300,7 +1303,8 @@ fn feed_input(shared: &Arc<Shared>, terminal_id: Option<&str>, data: &str) -> Va
             "echo": String::from_utf8_lossy(&echo).to_string(),
             "text": String::from_utf8_lossy(&out).to_string(),
         }),
-    }
+    };
+    (response, executed_lines)
 }
 
 fn execute_mc_command(shared: &Arc<Shared>, terminal_id: Option<String>, line: String) {
@@ -1863,8 +1867,14 @@ fn handle_request(shared: Arc<Shared>, payload: Value) {
                     .pointer("/kind/args/terminalId")
                     .and_then(Value::as_str)
                     .map(str::to_string);
-                let value = feed_input(&shared, terminal_id.as_deref(), &data);
+                let (value, executed_lines) =
+                    intercept_input(&shared, terminal_id.as_deref(), &data);
+                // Answer first: execution spawns a thread and may block on
+                // host calls, which must not delay the hook response.
                 respond_ok(&shared, &request_id, value);
+                for line in executed_lines {
+                    execute_mc_command(&shared, terminal_id.clone(), line);
+                }
             } else {
                 respond_error(
                     &shared,
@@ -1966,6 +1976,14 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Value-only view of the interceptor for buffer-behaviour tests. The
+    // executed-lines half is asserted through intercept_input directly where
+    // consumption matters; the host side effect (writeLocal) belongs to the
+    // smoke test, which runs the real protocol against a fake host.
+    fn feed_input(shared: &Arc<Shared>, terminal_id: Option<&str>, data: &str) -> Value {
+        intercept_input(shared, terminal_id, data).0
+    }
 
     #[test]
     fn decodes_hex_notification_data() {
@@ -2158,11 +2176,10 @@ mod tests {
             feed_input(&shared, Some("t1"), "c"),
             json!({ "echo": "c", "suppress": true })
         );
-        // The corrected "/mc" line is consumed and executed.
-        assert_eq!(
-            feed_input(&shared, Some("t1"), "\r"),
-            json!({ "echo": "\r\n", "suppress": true })
-        );
+        // The corrected "/mc" line is consumed and handed off for execution.
+        let (value, lines) = intercept_input(&shared, Some("t1"), "\r");
+        assert_eq!(value, json!({ "echo": "\r\n", "suppress": true }));
+        assert_eq!(lines, vec!["/mc".to_string()]);
     }
 
     #[test]
@@ -2213,12 +2230,12 @@ mod tests {
     #[test]
     fn input_interceptor_drops_pairing_lf_after_consumed_line() {
         let shared = Shared::new();
-        // CRLF Enter: the command is consumed on CR and the pairing LF must
-        // not leak to the device as an empty command.
-        assert_eq!(
-            feed_input(&shared, Some("t5"), "/mc\r\n"),
-            json!({ "echo": "/mc\r\n", "suppress": true })
-        );
+        // CRLF Enter: the command is consumed on CR, handed off for
+        // execution, and the pairing LF must not leak to the device as an
+        // empty command.
+        let (value, lines) = intercept_input(&shared, Some("t5"), "/mc\r\n");
+        assert_eq!(value, json!({ "echo": "/mc\r\n", "suppress": true }));
+        assert_eq!(lines, vec!["/mc".to_string()]);
         // Unrelated lines replay verbatim, CRLF included.
         assert_eq!(
             feed_input(&shared, Some("t5"), "ok\r\n"),
