@@ -23,7 +23,7 @@
   "mcHelp": "Comandi di {title}:\n/mc status — mostra lo stato del dispositivo\n/mc baud <rate> — imposta la baud rate (1200–921600)\n/mc reboot — riavvia il dispositivo corrente\n/mc help — mostra questo aiuto\n* Sono accettate abbreviazioni con l'iniziale",
   "mcUnknown": "Comando sconosciuto: {command} — prova /mc help",
   "mcBaudUsage": "Uso: /mc baud <rate> (1200–921600)",
-  "mcBaudOk": "✓ Baud rate impostato su {baud} → {where}",
+  "mcBaudOk": "✓ Baud rate impostata su {baud} → {where}",
   "mcStatusBadFrame": "Impossibile interpretare la trama di stato del dispositivo.",
   "toolbarButton": "MC Helper",
   "toolbarModeOff": "Disattivato",

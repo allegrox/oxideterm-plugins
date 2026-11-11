@@ -8,7 +8,7 @@
   "restartButton": "Reiniciar dispositivo",
   "restartDone": "Dispositivo reiniciado. Reconecte-se.",
   "outOfRange": "✗ A taxa de baud está fora do intervalo ({min}–{max}).",
-  "noSession": "✗ Nenhuma sessão BLE encontrada. Conecte o dispositivo em um terminal primeiro.",
+  "noSession": "✗ Nenhuma sessão BLE encontrada. Conecte primeiro o dispositivo em um terminal.",
   "applying": "Enviando set_baud {baud} (era {expected}{assumed})…",
   "assumedSuffix": ", presumido",
   "responseTimeout": "Tempo limite aguardando a resposta do dispositivo.",

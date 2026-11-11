@@ -30,7 +30,7 @@
   "toolbarModeInline": "En ligne",
   "toolbarModeOverlay": "Superposé",
   "toolbarUnavailable": "L'extension MicroCon Helper n'est pas installée ou est désactivée.",
-  "statusBaud": "Vitesse de bauds actuelle",
+  "statusBaud": "Vitesse de transmission actuelle",
   "statusBattery": "Niveau de batterie",
   "statusTemp": "Température de l'appareil"
 }
