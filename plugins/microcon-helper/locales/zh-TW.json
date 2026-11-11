@@ -29,7 +29,7 @@
   "toolbarModeOff": "關閉",
   "toolbarModeInline": "行內",
   "toolbarModeOverlay": "浮窗",
-  "toolbarUnavailable": "MicroCon 助手 外掛程式未安裝或已停用。",
+  "toolbarUnavailable": "MicroCon 助手 插件未安裝或已禁用。",
   "statusBaud": "目前波特率",
   "statusBattery": "電池剩餘電量",
   "statusTemp": "裝置溫度"

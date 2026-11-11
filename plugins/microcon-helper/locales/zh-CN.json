@@ -29,7 +29,7 @@
   "toolbarModeOff": "关闭",
   "toolbarModeInline": "内联",
   "toolbarModeOverlay": "浮窗",
-  "toolbarUnavailable": "MicroCon 助手插件未安装或已禁用。",
+  "toolbarUnavailable": "MicroCon 助手 插件未安装或已禁用。",
   "statusBaud": "当前波特率",
   "statusBattery": "电池剩余电量",
   "statusTemp": "设备温度"
