@@ -660,6 +660,13 @@ fn mc_command_round_trip() {
             && frame.pointer("/payload/namespace").and_then(Value::as_str) == Some("terminal")
             && frame.pointer("/payload/method").and_then(Value::as_str) == Some("writeLocal")
     });
+    // The reply must target the terminal the command was typed in, not the
+    // (possibly moved) active pane.
+    assert_eq!(
+        notify.pointer("/payload/args/terminalId"),
+        Some(&json!("t9")),
+        "writeLocal must carry the intercepted terminalId"
+    );
     let description = notify
         .pointer("/payload/args/text")
         .and_then(Value::as_str)

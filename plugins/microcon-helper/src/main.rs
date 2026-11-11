@@ -1345,12 +1345,14 @@ fn execute_mc_command(shared: &Arc<Shared>, terminal_id: Option<String>, line: S
         // by the hook's terminator echo; only the result text goes to the
         // display channel, so the reply never repeats the command line.
         let payload = crlf(&format!("{text}\n"));
-        if let Err(message) = call_host_retry(
-            &shared,
-            "terminal",
-            "writeLocal",
-            json!({ "text": payload }),
-        ) {
+        // Target the terminal the command was typed in: without terminalId the
+        // host falls back to the active pane, which may have moved on while the
+        // command ran.
+        let mut args = json!({ "text": payload });
+        if let Some(terminal_id) = &terminal_id {
+            args["terminalId"] = json!(terminal_id);
+        }
+        if let Err(message) = call_host_retry(&shared, "terminal", "writeLocal", args) {
             debug_log(&format!("mc writeLocal failed: {message}"));
         }
     });
