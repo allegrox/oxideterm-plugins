@@ -373,7 +373,10 @@ fn full_protocol_round_trip() {
             .unwrap(),
         json!({}),
     );
-    let ack_frame = format!("{}\n", json!({ "type": "result", "id": command["id"], "ok": true }));
+    let ack_frame = format!(
+        "{}\n",
+        json!({ "type": "result", "id": command["id"], "ok": true })
+    );
     host.send(&event(
         "ble.notification",
         json!({ "characteristicUuid": STATUS_UUID, "data": hex_encode(ack_frame.as_bytes()) }),
@@ -474,7 +477,7 @@ fn full_protocol_round_trip() {
     // tick without polling again.
     host.send(&event(
         "toolbar.overlayClosed",
-        json!({ "actionId": "mc-helper-mode", "paneId": 1 }),
+        json!({ "actionId": "mc-helper-mode", "paneId": 1, "reason": "released" }),
     ));
     let closed = host.expect("overlay closed schema", |frame| {
         frame
@@ -491,6 +494,181 @@ fn full_protocol_round_trip() {
         Some(2),
         "status row removed once the overlay closed"
     );
+
+    // Reopen pane 1 to populate its cache, then hand the card away and back:
+    // closed(rebound) must not republish and the follow-up opened repaints
+    // from cache before the refresh round trip completes. Drop the frames of
+    // the released overlay first so only reopen frames can match below.
+    host.backlog.lock().unwrap().clear();
+    host.send(&event(
+        "toolbar.overlayOpened",
+        json!({ "actionId": "mc-helper-mode", "paneId": 1 }),
+    ));
+    for expect_metadata in [true, false] {
+        let sessions_call = host.call("sessions");
+        host.reply(
+            sessions_call
+                .pointer("/payload/requestId")
+                .and_then(Value::as_str)
+                .unwrap(),
+            json!({ "sessions": [
+                { "sessionId": "s1", "deviceName": "MicroCon-A", "connected": true },
+            ] }),
+        );
+        if expect_metadata {
+            let metadata_call = host.call("getMetadata");
+            host.reply(
+                metadata_call
+                    .pointer("/payload/requestId")
+                    .and_then(Value::as_str)
+                    .unwrap(),
+                json!({}),
+            );
+        }
+    }
+    let status_write = host.call("write");
+    let status_command: Value = serde_json::from_str(
+        status_write
+            .pointer("/payload/args/data")
+            .and_then(Value::as_str)
+            .unwrap()
+            .trim(),
+    )
+    .expect("get_status JSON");
+    assert_eq!(status_command["type"], json!("get_status"));
+    host.reply(
+        status_write
+            .pointer("/payload/requestId")
+            .and_then(Value::as_str)
+            .unwrap(),
+        json!({}),
+    );
+    let telemetry_frame = format!(
+        "{}\n",
+        json!({ "type": "status", "id": status_command["id"], "baud": 9600, "batteryPercent": 88, "tempValid": false })
+    );
+    host.send(&event(
+        "ble.notification",
+        json!({ "characteristicUuid": STATUS_UUID, "data": hex_encode(telemetry_frame.as_bytes()) }),
+    ));
+    host.expect("overlay cache populated", |frame| {
+        frame
+            .pointer("/payload/registration/kind")
+            .and_then(Value::as_str)
+            == Some("tab")
+            && schema_text(frame).contains("panelStatusRow")
+            && schema_text(frame).contains("88%")
+    });
+
+    // Rebound handover: let the superseded ticker retire through its unbound
+    // fallback first, then drop everything up to that point so only frames
+    // produced by the reopen can match the cached repaint.
+    host.send(&event(
+        "toolbar.overlayClosed",
+        json!({ "actionId": "mc-helper-mode", "paneId": 1, "reason": "rebound" }),
+    ));
+    std::thread::sleep(Duration::from_millis(1500));
+    host.backlog.lock().unwrap().clear();
+    host.send(&event(
+        "toolbar.overlayOpened",
+        json!({ "actionId": "mc-helper-mode", "paneId": 1 }),
+    ));
+    // The session capture runs before the repaint, so answer the implicit
+    // pick; the cached schema must then arrive while the refresh poll is
+    // still waiting for its write reply, i.e. no new telemetry was delivered.
+    let sessions_call = host.call("sessions");
+    host.reply(
+        sessions_call
+            .pointer("/payload/requestId")
+            .and_then(Value::as_str)
+            .unwrap(),
+        json!({ "sessions": [
+            { "sessionId": "s1", "deviceName": "MicroCon-A", "connected": true },
+        ] }),
+    );
+    let metadata_call = host.call("getMetadata");
+    host.reply(
+        metadata_call
+            .pointer("/payload/requestId")
+            .and_then(Value::as_str)
+            .unwrap(),
+        json!({}),
+    );
+    let cached = host.expect("rebound cached repaint", |frame| {
+        frame
+            .pointer("/payload/registration/kind")
+            .and_then(Value::as_str)
+            == Some("tab")
+            && schema_text(frame).contains("panelStatusRow")
+            && schema_text(frame).contains("88%")
+    });
+    let cached_row =
+        &cached["payload"]["registration"]["metadata"]["schema"]["sections"][0]["controls"][2];
+    assert_eq!(cached_row["children"][1]["text"], json!("88%"));
+    assert_eq!(
+        cached_row["children"][4]["text"],
+        json!("10s"),
+        "the countdown restarts from a full cycle on reopen"
+    );
+
+    // The refresh poll still runs to update the cache: answer it with
+    // changed telemetry and the row follows the device.
+    let sessions_call = host.call("sessions");
+    host.reply(
+        sessions_call
+            .pointer("/payload/requestId")
+            .and_then(Value::as_str)
+            .unwrap(),
+        json!({ "sessions": [
+            { "sessionId": "s1", "deviceName": "MicroCon-A", "connected": true },
+        ] }),
+    );
+    let refresh_write = host.call("write");
+    let refresh_command: Value = serde_json::from_str(
+        refresh_write
+            .pointer("/payload/args/data")
+            .and_then(Value::as_str)
+            .unwrap()
+            .trim(),
+    )
+    .expect("get_status JSON");
+    assert_eq!(refresh_command["type"], json!("get_status"));
+    host.reply(
+        refresh_write
+            .pointer("/payload/requestId")
+            .and_then(Value::as_str)
+            .unwrap(),
+        json!({}),
+    );
+    let refreshed_frame = format!(
+        "{}\n",
+        json!({ "type": "status", "id": refresh_command["id"], "baud": 9600, "batteryPercent": 91, "tempValid": false })
+    );
+    host.send(&event(
+        "ble.notification",
+        json!({ "characteristicUuid": STATUS_UUID, "data": hex_encode(refreshed_frame.as_bytes()) }),
+    ));
+    host.expect("rebound refresh applied", |frame| {
+        frame
+            .pointer("/payload/registration/kind")
+            .and_then(Value::as_str)
+            == Some("tab")
+            && schema_text(frame).contains("91%")
+    });
+
+    // Release pane 1 for good so the ticker retires before the chip-click
+    // regression below re-enters the overlay state.
+    host.send(&event(
+        "toolbar.overlayClosed",
+        json!({ "actionId": "mc-helper-mode", "paneId": 1, "reason": "released" }),
+    ));
+    host.expect("overlay released schema", |frame| {
+        frame
+            .pointer("/payload/registration/kind")
+            .and_then(Value::as_str)
+            == Some("tab")
+            && !schema_text(frame).contains("panelStatusRow")
+    });
 
     // Jitter regression: cycling the chip into the overlay state must
     // register the status row schema before the reportActionState frame, so
@@ -520,7 +698,10 @@ fn full_protocol_round_trip() {
         saw_row.get(),
         "the status row schema must be registered before reportActionState"
     );
-    assert_eq!(report_call.pointer("/payload/args/stateId"), Some(&json!("overlay")));
+    assert_eq!(
+        report_call.pointer("/payload/args/stateId"),
+        Some(&json!("overlay"))
+    );
     host.reply(
         report_call
             .pointer("/payload/requestId")

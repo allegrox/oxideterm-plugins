@@ -180,26 +180,37 @@ enum StatusView {
     },
 }
 
+// Per-pane telemetry the overlay card renders while the pane is bound. Kept
+// across a focus handover (the host pairs closed(rebound) with the follow-up
+// opened in the same event batch) so a reopened pane repaints from cache
+// instead of waiting for a BLE round trip.
+#[derive(Clone)]
+struct CachedStatus {
+    status: Value,
+    // Null parks the refresh countdown until the overlay reopens.
+    countdown: u8,
+}
+
 struct State {
     messages: Value,
     sessions: Vec<Session>,
     selected_session_id: Option<String>,
     sessions_note: Option<String>,
-    // Machine-readable telemetry rendered in the overlay card's status row;
-    // Null parks the refresh countdown until the overlay reopens.
-    panel_status: Value,
+    // Overlay telemetry cache, keyed by the pane the card was bound to.
+    status_cache: HashMap<u32, CachedStatus>,
+    // Pane currently holding the card; None while unbound. Driven purely by
+    // the host's open/close events.
+    bound_pane: Option<u32>,
     // Session captured when the overlay opens; overlay refreshes reuse it so
     // focusing another terminal cannot silently move the binding.
     panel_session_id: Option<String>,
     // Overlay refresh ownership moved from the host to the plugin: the
     // ticker thread of the current generation runs the countdown and the
-    // periodic get_status while the overlay is open (overlay_active), and
-    // freezes them while the anchor pane lost focus (overlay_visible).
-    // A newer open_overlay bumps the generation so an older loop exits.
-    overlay_active: bool,
+    // periodic get_status while the card is bound (bound_pane) and that pane
+    // has focus (overlay_visible). A newer open_overlay bumps the generation
+    // so an older loop exits.
     overlay_visible: bool,
     overlay_generation: u64,
-    panel_countdown: u8,
     // Nodes with a live ble.onNotification subscription (status
     // characteristic); released with offNotification on deactivation.
     notification_nodes: HashSet<String>,
@@ -215,12 +226,11 @@ impl State {
             sessions: Vec::new(),
             selected_session_id: None,
             sessions_note: None,
-            panel_status: Value::Null,
+            status_cache: HashMap::new(),
+            bound_pane: None,
             panel_session_id: None,
-            overlay_active: false,
             overlay_visible: false,
             overlay_generation: 0,
-            panel_countdown: PANEL_REFRESH_SECS as u8,
             notification_nodes: Default::default(),
             selected_baud: format!("{ASSUMED_CURRENT_BAUD}"),
             busy: false,
@@ -393,6 +403,17 @@ fn load_language(shared: &Shared) {
     state.messages = messages;
 }
 
+// Publish telemetry into the bound pane's overlay cache. Writes outside an
+// open overlay are dropped: the next open re-fetches, and a released pane
+// must not resurrect a row the host already closed.
+fn set_bound_panel_status(shared: &Shared, status: Value) {
+    let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+    let bound = state.bound_pane;
+    if let Some(entry) = bound.and_then(|pane| state.status_cache.get_mut(&pane)) {
+        entry.status = status;
+    }
+}
+
 fn set_status(shared: &Shared, status: StatusView) {
     {
         let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -560,10 +581,14 @@ fn render_status(state: &State) -> String {
 // tab; labels come from the active locale bundle and missing values use the
 // same dash placeholder the host bar showed.
 fn panel_status_row(state: &State) -> Value {
-    let telemetry = if state.panel_status.is_object() {
-        &state.panel_status
-    } else {
-        &Value::Null
+    // The card renders the bound pane's cache; an unbound pane or a failed
+    // fetch falls back to the dash placeholders.
+    let cached = state
+        .bound_pane
+        .and_then(|pane| state.status_cache.get(&pane));
+    let telemetry = match cached.map(|entry| &entry.status) {
+        Some(status) if status.is_object() => status,
+        _ => &Value::Null,
     };
     let number = |name: &str| telemetry.get(name).and_then(Value::as_f64);
     // Icon + value readouts with the hint as a host-rendered tooltip,
@@ -601,12 +626,14 @@ fn panel_status_row(state: &State) -> Value {
     ];
     // The countdown renders only while telemetry is live, matching the host
     // bar this row replaces: a parked refresh has no next poll to announce.
-    if state.panel_status.is_object() {
-        children.push(json!({
-            "kind": "readout",
-            "id": "panelRefreshCountdown",
-            "text": format!("{}s", state.panel_countdown),
-        }));
+    if let Some(entry) = cached {
+        if entry.status.is_object() {
+            children.push(json!({
+                "kind": "readout",
+                "id": "panelRefreshCountdown",
+                "text": format!("{}s", entry.countdown),
+            }));
+        }
     }
     json!({
         "kind": "row",
@@ -661,12 +688,15 @@ fn build_schema(state: &State) -> Value {
             "text": status_text,
         }),
     ];
-    // Keep the status row in the schema for the whole open-overlay lifetime,
-    // not just while focused: the ticker re-registers every second, and a
+    // Keep the status row in the schema for the whole bound lifetime, not
+    // just while focused: the ticker re-registers every second, and a
     // focus-lost schema without the row would make the card jump when focus
     // returns. Mirrors the chip-click pre-registration placeholder so the
-    // first paint after focus restore already has the final height.
-    if state.overlay_visible || state.overlay_active {
+    // first paint after focus restore already has the final height. During a
+    // rebound gap both flags are false and the row would drop, but the host
+    // pairs closed(rebound) with opened in one event batch and the plugin
+    // does not re-register between them, so the pushed schema never flickers.
+    if state.overlay_visible || state.bound_pane.is_some() {
         controls.push(panel_status_row(state));
     }
     json!({
@@ -1065,11 +1095,7 @@ fn apply_baud_inner(shared: &Arc<Shared>) -> Result<(), String> {
     // waiting for the next poll. Bare result acks carry no baud and keep the
     // previous telemetry.
     if response.get("baud").is_some() {
-        shared
-            .state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .panel_status = panel_status_from_frame(&response);
+        set_bound_panel_status(shared, panel_status_from_frame(&response));
     }
     let status = StatusView::SentOk {
         from: expected_baud,
@@ -1110,11 +1136,7 @@ fn restart_inner(shared: &Arc<Shared>) -> Result<(), String> {
     reboot_device(shared, &session)?;
     // The device drops the BLE link right after acking; clearing the telemetry
     // parks the overlay refresh countdown until the overlay reopens.
-    shared
-        .state
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .panel_status = Value::Null;
+    set_bound_panel_status(shared, Value::Null);
     set_status(shared, StatusView::Key("restartDone"));
     Ok(())
 }
@@ -1379,7 +1401,10 @@ fn pick_mc_session(shared: &Shared, terminal_id: Option<&str>) -> Result<Session
         .map(|entries| entries.iter().filter_map(Session::from_value).collect())
         .unwrap_or_default();
     if let Some(terminal_id) = terminal_id.filter(|id| !id.is_empty()) {
-        if let Some(session) = sessions.iter().find(|session| session.session_id == terminal_id) {
+        if let Some(session) = sessions
+            .iter()
+            .find(|session| session.session_id == terminal_id)
+        {
             return Ok(session.clone());
         }
     }
@@ -1540,11 +1565,7 @@ fn mc_baud_inner(
     // change must also refresh the overlay row without waiting for a poll.
     // The ack may be a bare result without telemetry; keep the old values then.
     if response.get("baud").is_some() {
-        shared
-            .state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .panel_status = panel_status_from_frame(&response);
+        set_bound_panel_status(shared, panel_status_from_frame(&response));
     }
     let message = shared.state.lock().unwrap_or_else(|e| e.into_inner()).t(
         "mcBaudOk",
@@ -1573,11 +1594,7 @@ fn mc_reboot_inner(shared: &Arc<Shared>, terminal_id: Option<&str>) -> Result<St
     reboot_device(shared, &session)?;
     // Same telemetry cleanup as the button path: the BLE link is gone after
     // the ack, so the overlay refresh countdown parks.
-    shared
-        .state
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .panel_status = Value::Null;
+    set_bound_panel_status(shared, Value::Null);
     let message = shared
         .state
         .lock()
@@ -1643,34 +1660,95 @@ fn report_next_toolbar_state(shared: &Shared, payload: &Value) {
     }
 }
 
+// Pure state transition of `toolbar.overlayOpened` (the BLE session pick and
+// the refresh poll stay in the caller). Returns whether the pane has cached
+// telemetry the caller must publish immediately, before the refresh round
+// trip completes.
+fn apply_overlay_opened(state: &mut State, pane_id: u32, session: Option<String>) -> bool {
+    let had_cache = if let Some(entry) = state.status_cache.get_mut(&pane_id) {
+        // The countdown restarts from a full cycle on every bind, cached or
+        // not; the cached status keeps rendering until the refresh lands.
+        entry.countdown = PANEL_REFRESH_SECS as u8;
+        true
+    } else {
+        state.status_cache.insert(
+            pane_id,
+            CachedStatus {
+                status: Value::Null,
+                countdown: PANEL_REFRESH_SECS as u8,
+            },
+        );
+        false
+    };
+    state.panel_session_id = session;
+    state.bound_pane = Some(pane_id);
+    // A freshly opened overlay is shown; the host follows up with
+    // visibility changes only when they actually happen.
+    state.overlay_visible = true;
+    state.overlay_generation += 1;
+    had_cache
+}
+
+// Pure state transition of `toolbar.overlayClosed`. Returns whether the
+// caller must re-register the schema (row removal). A `rebound` close keeps
+// the pane's cache and never republishes: the host pairs it with the
+// follow-up opened inside one event batch, and re-registering between the
+// two would flicker the shared schema's row away.
+fn apply_overlay_closed(state: &mut State, pane_id: u32, rebound: bool) -> bool {
+    if rebound {
+        if state.bound_pane == Some(pane_id) {
+            state.bound_pane = None;
+            state.overlay_visible = false;
+        }
+        return false;
+    }
+    state.status_cache.remove(&pane_id);
+    if state.bound_pane == Some(pane_id) {
+        state.bound_pane = None;
+        state.overlay_visible = false;
+        state.panel_session_id = None;
+        return true;
+    }
+    false
+}
+
 // Overlay lifecycle: the host only signals open/close/visibility events; the
 // refresh countdown and the periodic get_status poll belong to this plugin.
-// The opening pane's session is captured once (the toolbar chip belongs to
-// that pane, so it holds focus right now) and a fresh get_status runs
-// immediately: a parked panel (Null telemetry freezes the countdown) can
-// only un-park through this open-time poll or a later successful tab apply.
+// The opening pane's session is captured once (the host opens the card only
+// for the active pane, so the implicit pick resolves that pane's session) and
+// a fresh get_status runs immediately: a parked panel (Null telemetry
+// freezes the countdown) can only un-park through this open-time poll or a
+// later successful tab apply.
 fn open_overlay(shared: &Arc<Shared>, payload: &Value) {
     if payload.get("actionId").and_then(Value::as_str) != Some(TOOLBAR_ACTION_ID) {
         return;
     }
-    let session = pick_mc_session(shared, None).ok().map(|session| session.session_id);
-    let generation = {
-        let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
-        state.panel_session_id = session;
-        state.overlay_active = true;
-        // A freshly opened overlay is shown; the host follows up with
-        // visibility changes only when they actually happen.
-        state.overlay_visible = true;
-        state.panel_countdown = PANEL_REFRESH_SECS as u8;
-        state.overlay_generation += 1;
-        state.overlay_generation
+    let Some(pane_id) = payload.get("paneId").and_then(Value::as_u64) else {
+        return;
     };
+    let pane_id = pane_id as u32;
+    let session = pick_mc_session(shared, None)
+        .ok()
+        .map(|session| session.session_id);
+    let (generation, had_cache) = {
+        let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        let had_cache = apply_overlay_opened(&mut state, pane_id, session);
+        (state.overlay_generation, had_cache)
+    };
+    if had_cache {
+        // Rebind with cached telemetry: repaint immediately so the card
+        // never shows an empty row while the refresh round trip runs.
+        register_tab_view(shared);
+    }
     if let Some(status) = fetch_panel_status(shared) {
-        shared
-            .state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .panel_status = status;
+        let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        // Only publish into this open's binding: a handover during the round
+        // trip must not let a stale fetch poison another pane's cache.
+        if state.overlay_generation == generation && state.bound_pane == Some(pane_id) {
+            if let Some(entry) = state.status_cache.get_mut(&pane_id) {
+                entry.status = status;
+            }
+        }
     }
     register_tab_view(shared);
     run_panel_ticker(Arc::clone(shared), generation);
@@ -1680,15 +1758,21 @@ fn close_overlay(shared: &Arc<Shared>, payload: &Value) {
     if payload.get("actionId").and_then(Value::as_str) != Some(TOOLBAR_ACTION_ID) {
         return;
     }
-    {
+    let Some(pane_id) = payload.get("paneId").and_then(Value::as_u64) else {
+        return;
+    };
+    // A missing or unknown reason is treated as a full release: it is the
+    // safe teardown for a host that predates the rebound protocol.
+    let rebound = payload.get("reason").and_then(Value::as_str) == Some("rebound");
+    let republish = {
         let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
-        state.overlay_active = false;
-        state.overlay_visible = false;
-        state.panel_session_id = None;
+        apply_overlay_closed(&mut state, pane_id as u32, rebound)
+    };
+    if republish {
+        // The ticker observes the unbound state at its next 1s tick and
+        // exits; the row must already be gone from the pushed schema.
+        register_tab_view(shared);
     }
-    // The ticker observes overlay_active at its next 1s tick and exits; the
-    // row must already be gone from the pushed schema.
-    register_tab_view(shared);
 }
 
 fn set_overlay_visibility(shared: &Arc<Shared>, payload: &Value) {
@@ -1698,11 +1782,16 @@ fn set_overlay_visibility(shared: &Arc<Shared>, payload: &Value) {
     let Some(visible) = payload.get("visible").and_then(Value::as_bool) else {
         return;
     };
-    shared
-        .state
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .overlay_visible = visible;
+    let Some(pane_id) = payload.get("paneId").and_then(Value::as_u64) else {
+        return;
+    };
+    let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+    // Only the bound pane's focus drives the countdown; a report for another
+    // member (e.g. one that raced a handover) must not freeze or unfreeze
+    // the card the user is looking at.
+    if state.bound_pane == Some(pane_id as u32) {
+        state.overlay_visible = visible;
+    }
 }
 
 // Single-instance guard: exactly one loop runs per open_overlay generation.
@@ -1712,32 +1801,49 @@ fn set_overlay_visibility(shared: &Arc<Shared>, payload: &Value) {
 fn run_panel_ticker(shared: Arc<Shared>, generation: u64) {
     loop {
         thread::sleep(Duration::from_secs(1));
-        let fire = {
+        let (fire, bound) = {
             let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
-            if !state.overlay_active || state.overlay_generation != generation {
+            if state.overlay_generation != generation {
+                // A newer open owns the card; never publish over its schema.
                 break;
             }
-            // Frozen while the anchor pane lost focus; parked while the last
+            let Some(bound) = state.bound_pane else {
+                // Unbound at tick time: either a released close (already
+                // republished) or a rebound whose follow-up opened never
+                // arrived. Publish the unbound schema once so a stale row
+                // cannot linger, then retire this loop.
+                drop(state);
+                register_tab_view(&shared);
+                break;
+            };
+            // Frozen while the bound pane lost focus; parked while the last
             // get_status failed — the countdown only runs on live telemetry.
-            if state.overlay_visible && state.panel_status.is_object() {
-                state.panel_countdown -= 1;
+            let visible = state.overlay_visible;
+            let entry = state
+                .status_cache
+                .get_mut(&bound)
+                .expect("open_overlay inserts the bound pane's cache entry");
+            if visible && entry.status.is_object() {
+                entry.countdown -= 1;
             }
-            if state.panel_countdown == 0 {
-                state.panel_countdown = PANEL_REFRESH_SECS as u8;
-                true
-            } else {
-                false
+            let fire = entry.countdown == 0;
+            if fire {
+                entry.countdown = PANEL_REFRESH_SECS as u8;
             }
+            (fire, bound)
         };
         if fire {
             // None means a tab operation owns the wait slot: keep showing the
             // previous telemetry instead of failing the refresh.
             if let Some(status) = fetch_panel_status(&shared) {
-                shared
-                    .state
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .panel_status = status;
+                let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+                // A handover during the round trip supersedes this loop; a
+                // stale fetch must not poison another pane's cache.
+                if state.overlay_generation == generation {
+                    if let Some(entry) = state.status_cache.get_mut(&bound) {
+                        entry.status = status;
+                    }
+                }
             }
         }
         register_tab_view(&shared);
@@ -2067,13 +2173,19 @@ mod tests {
     #[test]
     fn overlay_status_row_formats_values_and_follows_overlay_lifecycle() {
         let mut state = State::new();
+        state.bound_pane = Some(1);
         state.overlay_visible = true;
-        state.panel_status = json!({
-            "baud": 115200.0,
-            "batteryPercent": 88.0,
-            "temperatureC": Value::Null,
-        });
-        state.panel_countdown = 7;
+        state.status_cache.insert(
+            1,
+            CachedStatus {
+                status: json!({
+                    "baud": 115200.0,
+                    "batteryPercent": 88.0,
+                    "temperatureC": Value::Null,
+                }),
+                countdown: 7,
+            },
+        );
         let schema = build_schema(&state);
         let controls = schema["sections"][0]["controls"].as_array().unwrap();
         assert_eq!(controls.len(), 3, "status row appended while visible");
@@ -2095,24 +2207,129 @@ mod tests {
         assert_eq!(row["children"][3]["kind"], json!("spacer"));
         assert_eq!(row["children"][4]["text"], json!("7s"));
 
-        // Focus lost while the overlay stays open: the row must remain as a
+        // Focus lost while the card stays bound: the row must remain as a
         // height placeholder so the ticker's re-registration does not make
         // the card jump when focus returns.
         state.overlay_visible = false;
-        state.overlay_active = true;
         let schema = build_schema(&state);
         assert_eq!(
             schema["sections"][0]["controls"].as_array().unwrap().len(),
             3,
-            "status row kept while the overlay is open but unfocused"
+            "status row kept while the card is bound but unfocused"
         );
 
-        state.overlay_active = false;
+        // Released: unbound with the cache dropped, the row is removed.
+        state.bound_pane = None;
+        state.status_cache.remove(&1);
         let schema = build_schema(&state);
         assert_eq!(
             schema["sections"][0]["controls"].as_array().unwrap().len(),
             2,
             "no status row once the overlay is closed"
+        );
+    }
+
+    #[test]
+    fn rebound_close_keeps_cache_and_reopen_repaints_from_it() {
+        let mut state = State::new();
+        assert!(!apply_overlay_opened(&mut state, 1, Some("s1".to_string())));
+        state.status_cache.get_mut(&1).unwrap().status =
+            json!({ "baud": 9600.0, "batteryPercent": 88.0 });
+
+        // A rebound close only unbinds: the pane keeps its cache and the
+        // caller must not republish, so the shared schema never flickers the
+        // row away between the host's closed/opened pair.
+        assert!(!apply_overlay_closed(&mut state, 1, true));
+        assert_eq!(state.bound_pane, None);
+        assert!(!state.overlay_visible);
+        assert_eq!(
+            state.status_cache.get(&1).map(|entry| &entry.status),
+            Some(&json!({ "baud": 9600.0, "batteryPercent": 88.0 })),
+            "the rebound pane keeps its cached telemetry"
+        );
+
+        // Reopening the same pane hits the cache: the caller repaints
+        // immediately and the countdown restarts from a full cycle.
+        let generation = state.overlay_generation;
+        assert!(apply_overlay_opened(&mut state, 1, Some("s1".to_string())));
+        assert!(state.overlay_generation > generation);
+        assert_eq!(state.bound_pane, Some(1));
+        assert!(state.overlay_visible);
+        let entry = state.status_cache.get(&1).unwrap();
+        assert_eq!(entry.countdown, PANEL_REFRESH_SECS as u8);
+        let schema = build_schema(&state);
+        let row = &schema["sections"][0]["controls"][2];
+        assert_eq!(row["children"][1]["text"], json!("88%"));
+        assert_eq!(row["children"][4]["text"], json!("10s"));
+    }
+
+    #[test]
+    fn released_close_drops_cache_and_only_republishes_for_the_bound_pane() {
+        let mut state = State::new();
+        apply_overlay_opened(&mut state, 1, Some("s1".to_string()));
+        state.status_cache.get_mut(&1).unwrap().status = json!({ "baud": 9600.0 });
+        state.status_cache.insert(
+            2,
+            CachedStatus {
+                status: json!({ "baud": 19200.0 }),
+                countdown: 3,
+            },
+        );
+
+        // Releasing an unbound member drops only its cache entry; the card
+        // keeps rendering the bound pane.
+        assert!(!apply_overlay_closed(&mut state, 2, false));
+        assert!(!state.status_cache.contains_key(&2));
+        assert_eq!(state.bound_pane, Some(1));
+        assert_eq!(
+            state.status_cache.get(&1).map(|entry| &entry.status),
+            Some(&json!({ "baud": 9600.0 }))
+        );
+
+        // Releasing the bound pane unbinds and republishes the row-free
+        // schema, and its cache is gone.
+        assert!(apply_overlay_closed(&mut state, 1, false));
+        assert_eq!(state.bound_pane, None);
+        assert!(state.status_cache.is_empty());
+        let schema = build_schema(&state);
+        assert_eq!(
+            schema["sections"][0]["controls"].as_array().unwrap().len(),
+            2,
+            "status row removed once the bound pane was released"
+        );
+    }
+
+    #[test]
+    fn visibility_event_only_applies_to_the_bound_pane() {
+        let shared = Arc::new(Shared::new());
+        {
+            let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+            apply_overlay_opened(&mut state, 1, None);
+        }
+        // A report for an unbound member is dropped: it must not freeze the
+        // countdown of the card the user is looking at.
+        set_overlay_visibility(
+            &shared,
+            &json!({ "actionId": TOOLBAR_ACTION_ID, "paneId": 2, "visible": false }),
+        );
+        assert!(
+            shared
+                .state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .overlay_visible,
+            "visibility of another pane must not change the bound card"
+        );
+        set_overlay_visibility(
+            &shared,
+            &json!({ "actionId": TOOLBAR_ACTION_ID, "paneId": 1, "visible": false }),
+        );
+        assert!(
+            !shared
+                .state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .overlay_visible
         );
     }
 
