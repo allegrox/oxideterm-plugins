@@ -33,7 +33,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "24"
       - run: npm ci --ignore-scripts
       - run: node scripts/catalog.mjs generate
       - run: npm test

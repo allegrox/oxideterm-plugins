@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
           architecture: ${{ matrix.platform.arch }}
       - run: rustup toolchain install 1.94.1-${{ matrix.platform.target }} --profile minimal
       - run: rustup default 1.94.1-${{ matrix.platform.target }}
@@ -56,7 +56,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
       - run: npm ci --ignore-scripts
       - uses: actions/download-artifact@v4
         with:

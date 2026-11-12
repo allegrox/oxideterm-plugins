@@ -53,7 +53,7 @@ jobs:
           path: native-deps/vcpkg
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
           architecture: ${{ matrix.arch }}
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config ninja-build patchelf

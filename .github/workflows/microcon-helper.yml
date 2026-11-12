@@ -29,7 +29,7 @@ jobs:
       # Node is only needed for the marketplace release tooling below.
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
           architecture: ${{ matrix.arch }}
       - run: npm ci --ignore-scripts
       - run: rustup toolchain install 1.94.1-${{ matrix.target }} --profile minimal

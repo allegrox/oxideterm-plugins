@@ -28,7 +28,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
       - run: npm ci --ignore-scripts
       - name: Verify released assets and publish a consistent catalog
         env:
