@@ -48,7 +48,7 @@ jobs:
           architecture: ${{ matrix.arch }}
       - name: Install native Rust toolchain
         run: rustup toolchain install ${{ env.RUSTUP_TOOLCHAIN }} --profile minimal
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -65,7 +65,7 @@ jobs:
         run: npm --prefix plugins/pdf-preview run package
       - name: Test rendering from the extracted package
         run: npm --prefix plugins/pdf-preview run test:package
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pdf-preview-package-${{ matrix.target }}
           path: plugins/pdf-preview/dist/pdf-preview-*-${{ matrix.target }}.zip
@@ -81,7 +81,7 @@ jobs:
         with:
           node-version: '24'
       - run: npm ci --ignore-scripts
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: pdf-preview-package-*
           path: dist/pdf-preview
@@ -109,7 +109,7 @@ jobs:
           fs.writeFileSync('dist/pdf-preview/release-notes.md', `## 中文\n\nPDF 预览插件 ${manifest.version}，支持翻页、缩放和适应宽度。\n\n主程序要求：OxideTerm ${manifest.engines.oxideterm}\n\nmacOS、Linux、Windows 的 ARM64 和 x86_64 安装包均已通过实际 PDF 页面渲染检查。\n\n## English\n\nPDF Preview ${manifest.version} supports page navigation, zoom and fit-to-width.\n\nHost requirement: OxideTerm ${manifest.engines.oxideterm}\n\nAll six ARM64 and x86_64 packages for macOS, Linux and Windows passed PDF rendering checks.\n`);
           fs.appendFileSync('dist/pdf-preview/release-notes.md', '\n' + fs.readFileSync('docs/catalog-upgrade-notice.md', 'utf8'));
           JS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pdf-preview-release
           path: dist/pdf-preview/
@@ -127,7 +127,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: pdf-preview-release
           path: dist/pdf-preview

@@ -81,7 +81,7 @@ jobs:
         run: node scripts/release-plugin.mjs prepare plugins/fido2
       - run: node plugins/fido2/scripts/build.mjs
       - run: node plugins/fido2/scripts/verify-package.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: fido2-${{ matrix.target }}
           path: plugins/fido2/dist/*.zip

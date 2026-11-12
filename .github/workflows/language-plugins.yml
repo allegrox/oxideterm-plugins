@@ -60,7 +60,7 @@ jobs:
         run: |
           node scripts/release-plugin.mjs entry "dist/languages/$LANGUAGE" --release-url "https://github.com/$GH_REPO/releases/download/$RELEASE_TAG" --package "any=dist/languages/$PLUGIN_ID-$PLUGIN_VERSION.zip" --output dist/languages/catalog-entry.json
           npm run check
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: language-${{ inputs.language }}
           path: |

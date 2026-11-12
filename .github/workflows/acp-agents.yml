@@ -40,7 +40,7 @@ jobs:
       - run: node scripts/release-plugin.mjs prepare plugins/${{ matrix.plugin }}
       - run: node scripts/build-acp-agent.mjs ${{ matrix.plugin }}
       - run: node scripts/verify-acp-agent.mjs ${{ matrix.plugin }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.plugin }}-${{ matrix.platform.target }}
           path: plugins/${{ matrix.plugin }}/dist/*.zip
@@ -58,7 +58,7 @@ jobs:
         with:
           node-version: '24'
       - run: npm ci --ignore-scripts
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist/acp
           merge-multiple: true

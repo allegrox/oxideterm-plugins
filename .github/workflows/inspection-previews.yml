@@ -36,7 +36,7 @@ jobs:
         run: node scripts/release-plugin.mjs prepare plugins/${{ matrix.plugin }}
       - run: node scripts/build-inspection-plugin.mjs ${{ matrix.plugin }}
       - run: node scripts/verify-inspection-plugin.mjs ${{ matrix.plugin }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: inspection-${{ matrix.plugin }}-${{ matrix.platform.target }}
           path: plugins/${{ matrix.plugin }}/dist/*.zip

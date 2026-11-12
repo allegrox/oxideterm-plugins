@@ -39,7 +39,7 @@ jobs:
           architecture: ${{ matrix.arch }}
       - run: npm ci --ignore-scripts
       - run: node --test scripts/host-tools-dashboard.test.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dashboard-${{ matrix.os }}
           path: plugins/host-tools-dashboard/dist/*.zip
@@ -62,7 +62,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - if: inputs.publish
         run: node scripts/release-plugin.mjs prepare plugins/host-tools-dashboard
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: dashboard-*
           path: dist/dashboard
@@ -93,7 +93,7 @@ jobs:
           fs.appendFileSync('dist/dashboard/release-notes.md', '\n' + fs.readFileSync('docs/catalog-upgrade-notice.md', 'utf8'));
           fs.appendFileSync(process.env.GITHUB_ENV, `RELEASE_TAG=${tag}\nPLUGIN_VERSION=${manifest.version}\n`);
           JS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dashboard-release
           path: dist/dashboard/

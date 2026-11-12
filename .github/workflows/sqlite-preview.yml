@@ -49,7 +49,7 @@ jobs:
         run: node scripts/release-plugin.mjs prepare plugins/sqlite-preview
       - run: node plugins/sqlite-preview/scripts/build.mjs
       - run: node plugins/sqlite-preview/scripts/verify-package.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sqlite-preview-${{ matrix.target }}
           path: plugins/sqlite-preview/dist/*.zip
