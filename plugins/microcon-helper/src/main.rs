@@ -661,7 +661,12 @@ fn build_schema(state: &State) -> Value {
             "text": status_text,
         }),
     ];
-    if state.overlay_visible {
+    // Keep the status row in the schema for the whole open-overlay lifetime,
+    // not just while focused: the ticker re-registers every second, and a
+    // focus-lost schema without the row would make the card jump when focus
+    // returns. Mirrors the chip-click pre-registration placeholder so the
+    // first paint after focus restore already has the final height.
+    if state.overlay_visible || state.overlay_active {
         controls.push(panel_status_row(state));
     }
     json!({
@@ -2056,11 +2061,11 @@ mod tests {
     }
 
     // The overlay card renders whatever schema the plugin pushes, so the
-    // status row contract (formatting, dash placeholders, visibility gating)
-    // is asserted on the built schema; the dropped panelStatus field is a
-    // wire contract and asserted once in the smoke test.
+    // status row contract (formatting, dash placeholders, overlay-lifecycle
+    // gating) is asserted on the built schema; the dropped panelStatus field
+    // is a wire contract and asserted once in the smoke test.
     #[test]
-    fn overlay_status_row_formats_values_and_follows_visibility() {
+    fn overlay_status_row_formats_values_and_follows_overlay_lifecycle() {
         let mut state = State::new();
         state.overlay_visible = true;
         state.panel_status = json!({
@@ -2090,12 +2095,24 @@ mod tests {
         assert_eq!(row["children"][3]["kind"], json!("spacer"));
         assert_eq!(row["children"][4]["text"], json!("7s"));
 
+        // Focus lost while the overlay stays open: the row must remain as a
+        // height placeholder so the ticker's re-registration does not make
+        // the card jump when focus returns.
         state.overlay_visible = false;
+        state.overlay_active = true;
+        let schema = build_schema(&state);
+        assert_eq!(
+            schema["sections"][0]["controls"].as_array().unwrap().len(),
+            3,
+            "status row kept while the overlay is open but unfocused"
+        );
+
+        state.overlay_active = false;
         let schema = build_schema(&state);
         assert_eq!(
             schema["sections"][0]["controls"].as_array().unwrap().len(),
             2,
-            "no status row while the overlay is hidden"
+            "no status row once the overlay is closed"
         );
     }
 
