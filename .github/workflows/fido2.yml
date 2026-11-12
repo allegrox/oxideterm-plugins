@@ -45,13 +45,13 @@ jobs:
       VCPKGRS_TRIPLET: ${{ matrix.triplet }}
       MACOSX_DEPLOYMENT_TARGET: '11.0'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           repository: microsoft/vcpkg
           ref: 434307da09bc05b2c86996dccc8b2351fc0d5d37
           path: native-deps/vcpkg
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           architecture: ${{ matrix.arch }}

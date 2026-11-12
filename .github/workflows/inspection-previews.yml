@@ -24,8 +24,8 @@ jobs:
           - { os: windows-11-arm, arch: arm64, target: aarch64-pc-windows-msvc }
     runs-on: ${{ matrix.platform.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           architecture: ${{ matrix.platform.arch }}
